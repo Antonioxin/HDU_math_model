@@ -1,0 +1,22 @@
+# 数模竞赛 Python 依赖
+# 安装：pip install -r requirements.txt
+
+numpy
+scipy
+pandas
+matplotlib
+seaborn
+sympy
+scikit-learn
+jupyter
+tqdm
+openpyxl
+
+# 可选：优化求解
+pulp
+gurobipy
+
+# 可选：时序 / 进阶模型
+statsmodels
+# xgboost
+# lightgbm

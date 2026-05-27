@@ -1,0 +1,3 @@
+# figures/
+
+论文实际引用的图片。由代码手从 `code/results/figures/` 复制过来后，由论文手在 `.tex` 中引用。

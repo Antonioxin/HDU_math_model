@@ -1,0 +1,3 @@
+# references/
+
+文献 PDF、行业报告、外部数据快照。大体积文件请走 Git LFS 或在 `.gitignore` 中排除。
