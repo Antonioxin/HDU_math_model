@@ -17,5 +17,5 @@ $aux_dir = 'build';
 $pdf_previewer = 'open %S';
 $preview_continuous_mode = 0;
 
-# 参考文献：biblatex + biber backend（GB/T 7714-2015）
-$bibtex_use = 2;        # 即使 .aux 中没引用也运行 biber
+# 参考文献：thebibliography 手动录入，无需 biber
+$bibtex_use = 0;

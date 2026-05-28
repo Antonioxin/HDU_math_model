@@ -1,0 +1,155 @@
+\documentclass[UTF8]{ctexart}
+\usepackage{shumo}%可以点开查看宏包和定义内容，同时可以自行另外加宏包和定义
+\geometry{left=2.50cm,right=2.5cm,top=2.50cm,bottom=2.5cm}%页面布局集训标准，可自行适当修改
+%====================================================
+%设置附录代码的格式，可以自行修改
+\lstset{
+	breaklines=true,% 允许自动断行
+	% breakatwhitespace=true,% 使用此命令仅允许在空格处自动断行
+	showstringspaces=false,% 不显示字符串中的空格
+	basicstyle=\small\ttfamily,% 设置代码基本样式
+	flexiblecolumns=true,% 改善字母间距
+	keywordstyle=\color{blue},% 设置关键词样式
+	stringstyle=\color[rgb]{0.75,0,0.75},% 设置字符串样式
+	commentstyle=\songti\color[rgb]{0,0.5,0},% 设置注释样式
+	tabsize=4,% 设置制表符缩进
+}
+%====================================================
+\title{\textbf{杭电数学建模竞赛}}% 请勿修改
+\date{}%请勿添加自己的信息
+\author{}%请勿添加自己的信息
+%下面时正文
+\begin{document}
+\setcounter{page}{1}%从正文开始计算页码	
+\maketitle
+\vspace{-0.95cm}
+\thispagestyle{fancy}   
+\fancyhf{} %清除原本页眉页脚形式
+\renewcommand{\headrulewidth}{0pt} %页眉线宽，设为0可以去页眉线
+%=================================================
+%=================================================
+%=================================================
+%=================================================
+%=================================================
+%=================================================
+%下面开始出现各位需要修改的部分。
+\renewcommand{\abstractname}{\sihao 摘\quad 要} %更改摘要二字的样式
+\begin{abstract}\xiaosihao
+	\vspace{0.1cm}
+	以下只是一个样例说明，通过下面说明各位同学可以进行学习如何换行，加粗字体。预祝各位同学取得好成绩！\par
+	针对问题一，分析商品买卖机理，\textbf{建立基于双十一规则商家利益最大化判别模型}。本文以经济学价格理论为基础，分析得商家参与活动通过降低单次商品利润提高总销量而获得更高利润。\textbf{选取利润为指标}，基于商家参与活动规则，综合活动前后利润判别式，以营业额最大化为目标建立判别模型。通过具体数据如WIS水润面膜相对非双十一销售额翻了近110倍说明商家是理性的。\par
+	针对问题三，分析选取消费者与商家群体双赢指标，\textbf{建立消费者是否购买与商家是否提供高质量服务的演化博弈模型}。本文考虑商家与消费者对“赢”的定义不同，查阅文献\textbf{以商家能吸引消费者购买和消费者能得到高质量服务为双赢指标}。基于不同行为下商家与消费者收益变化，建立演化博弈模型。\textbf{模型求解结果为消费者趋向于购买和商家趋向于提供高质量服务的双赢局面}，并通过2009-2019年成交总额的指数型上涨说明结果准确性。\par
+		针对问题三，分析选取消费者与商家群体双赢指标，\textbf{建立消费者是否购买与商家是否提供高质量服务的演化博弈模型}。本文考虑商家与消费者对“赢”的定义不同，查阅文献\textbf{以商家能吸引消费者购买和消费者能得到高质量服务为双赢指标}。基于不同行为下商家与消费者收益变化，建立演化博弈模型。\textbf{模型求解结果为消费者趋向于购买和商家趋向于提供高质量服务的双赢局面}，并通过2009-2019年成交总额的指数型上涨说明结果准确性。\par
+	针对问题四，基于商家竞争规律，\textbf{建立商家是否提供高质量商品的演化博弈模型}。考虑到电子商务普遍有商品质量不高现象，\textbf{本文以双十一作用下商家间竞争能否提高商品质量为指标}。基于不同行为下同类商家收益变化建立模型。\textbf{模型求解结果为同类商家之间趋向用高质量商品进行竞争}，通过2013-2015年双十一过后的投诉率（$6.9$、$6.1$、$4.6\times10^{-7}$）不断下降说明结果准确性。\par
+	针对问题五：本文从商家和买家的角度考虑，在前面四问的基础上，以国家质检局抽检网络产品不合格率以及双十一个人网购数据为例对双十一购物期间某些不理性的行为进行说明，并提出\textbf{“理性消费”}的合理建议，即：\textbf{商家销售保持诚信}、\textbf{买家购物理性消费}、\textbf{买家积极反馈维权}。
+	\\
+	
+	%这里填写你自己的关键词
+	
+	\textbf{关键词}:\quad 双十一购物节，基于目标规划的判别模型，演化博弈模型
+\end{abstract}
+
+\pagestyle{plain}
+%标准 LaTeX 提供下列四种页版式，可用 \pagestyle{页版式} 命令来设置页面版式：
+%empty(没有页眉和页脚)，plain(本次用的，无页眉，页脚为居中页码)，headings(页眉为章节标题，无页脚)，myheadings(页眉内容可自定义，无页脚)
+
+
+\section{问题背景}
+\section{问题分析}
+\section{假设与符号说明}
+\section{模型建立}
+\subsection{模型一}
+\subsubsection{模型一结果与灵敏度分析}
+\subsection{模型二}	
+\subsubsection{模型一结果与灵敏度分析}
+
+
+%Reference
+\begin{thebibliography}{40}
+	\bibitem{1}杭宇.对双十一购物狂欢节的思考[J].中国商论,2018,(35):74-75. DOI:10.19699/j.cnki.issn2096-0298.2018.35.074.
+	\bibitem{2}林攸."双十一"背后的经济学理论[J].新商务周刊,2020,(2):282.
+	\bibitem{3}Barbara Deleersnyder, Marnik G. Dekimpe, Jan-Benedict E.M. Steenkamp, Oliver Koll,Win–win strategies at discount stores,Journal of Retailing and Consumer Services,Volume 14, Issue 5,2007,Pages 309-318,ISSN 0969-6989,https://doi.org/10.1016/j.jretconser.2006.09.009.
+
+	
+	
+	
+\end{thebibliography}
+\newpage
+\newgeometry{left=1.50cm,right=0.5cm,top=3.00cm,bottom=3.0cm}	%修改附录代码的几何页面
+
+\begin{center}
+	\sihao \heiti 附录
+	
+	
+	\fontsize{10pt}{16pt}		\selectfont	
+	\begin{lstlisting}[ language=MATLAB,numbers=left,numberstyle=\tiny,keywordstyle=\color{blue!70},commentstyle=\color{red!50!green!50!blue!50},frame=shadowbox, rulesepcolor=\color{red!20!green!20!blue!20},escapeinside=``,xleftmargin=2em,xrightmargin=2em,aboveskip=1em] 
+	%%%问题一
+	%%图形
+	%从1到5商品分别代表着：帮宝适绿帮纸尿裤、黛珂牛油果紫苏水套装
+	%WIS水润面膜、飞利浦电动牙刷HX6616、HFP熊果苷补水面膜
+	%g表示每个商品双十一的销售额(单位：万元)
+	%h表示每个商品平时十天的销售额(单位：万元)
+	clc,clear
+	figure('color','w','name','18年双十一和平时情况下不同商品销售额的对比');
+	x=1:1:5;
+	g=[1901.5;3582.2;1281.1;977.9;1360.8];
+	h=[85.02;5.8716;11.6326;7.8864;10.8621];
+	plot(x,g,'*-','color',[0,6,35]/255,'linewidth',1.1);
+	hold on;
+	plot(x,h,'rd-','linewidth',1.1);
+	grid minor
+	xlabel('对应商品种类','Interpreter', 'none','FontSize',20);
+	ylabel('商品销售额/万元','Interpreter', 'none','FontSize',20);
+	legend('\fontname{华文中宋}18年双十一的销售额','\fontname{华文中宋}18年平时十天的销售额','location','northeast','Fontsize',13);
+	set(gca,'linewidth',1.1,'fontsize',16)
+	
+	%%
+	x3=1:1:5;
+	y3=[1901.5-85.02;3582.2-5.8716;1281.1-11.6326;977.9-7.8864;1360.8-10.8621];
+	
+	dataT=zeros(5,5);
+	for i=1:5
+	dataT(i,i)=y3(i);
+	end
+	data1=dataT(1,:);
+	data2=dataT(2,:);
+	data3=dataT(3,:);
+	data4=dataT(4,:);
+	data5=dataT(5,:);
+	figure('color','w','name','18年双十一和平时情况下对应商品的差值');
+	h1=bar(data1,'FaceColor',[248/255  203/255  127/255],'BarWidth',0.8);
+	set(h1,'edgecolor','none');
+	hold on
+	h2=bar(data2,'FaceColor',[248/255  149/255  136/255],'BarWidth',0.8);
+	set(h2,'edgecolor','none');
+	hold on
+	h3=bar(data3,'FaceColor',[147/255  224/255  255/255],'BarWidth',0.8);
+	set(h3,'edgecolor','none');
+	hold on
+	h4=bar(data4,'FaceColor',[145/255  146/255  171/255],'BarWidth',0.8);
+	set(h4,'edgecolor','none');
+	hold on
+	h5=bar(data5,'FaceColor',[120/255  152/255  225/255],'BarWidth',0.8);
+	set(h5,'edgecolor','none');
+	for i=1:length(x3)
+	string=sprintf('%4.2f',y3(i));
+	text(x3(i)-0.35,y3(i)+100,string)
+	end
+	grid minor
+	xlabel('对应商品种类','Interpreter', 'none','FontSize',20);
+	ylabel('销售额差值/万元','Interpreter', 'none','FontSize',20);
+	%%
+	%%求解相等成本
+	syms c;
+	g=[1901.5;3582.2;1281.1;977.9;1360.8];%五种商品的双十一销售额
+	h=[85.02;5.8716;11.6326;7.8864;10.8621];%五种商品平时的销售额
+	d1=[4.5;6;16;1.0878;12.5];%双十一时五种商品的销量
+	d2=[0.2834;0.0084;0.1187;0.0053;0.0729];%平时五种商品的销量
+	c=(g-h)./(d1-d2)
+
+	
+	
+	
+	\end{lstlisting}
+\end{center}
+\end{document}

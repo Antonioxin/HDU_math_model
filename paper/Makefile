@@ -14,7 +14,7 @@ PDF  := $(BUILD)/$(MAIN).pdf
 
 all: $(PDF)
 
-$(PDF): $(MAIN).tex $(wildcard sections/*.tex) references.bib
+$(PDF): $(MAIN).tex $(wildcard sections/*.tex) shumo.sty
 	latexmk $(MAIN).tex
 
 watch:
