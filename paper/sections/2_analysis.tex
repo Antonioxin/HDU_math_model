@@ -1,0 +1,80 @@
+\section{问题分析}
+
+本题围绕反作用飞轮健康管理展开，数据来源既包含飞轮电流、温度、转速等在轨监测量，也包含 XJTU-SY 轴承全寿命振动数据。二者观测对象不同，但底层机理均与轴承润滑退化、摩擦上升和失效演化有关。因此，问题分析的关键在于将不同数据源统一到同一退化建模框架中：飞轮侧以电流作为摩擦力矩退化的外显变量，轴承侧以振动特征构造健康指数，最终通过跨域迁移学习把轴承全寿命信息引入飞轮剩余寿命预测。
+
+\subsection{问题一分析}
+
+问题一是全文的目标域基础，其作用是从飞轮自身监测数据中建立可解释的退化基线。飞轮电机电流与摩擦力矩近似成正比，而题面给出摩擦力矩随时间呈指数增长的退化形式，因此可先建立具有物理含义的指数退化模型，用于解释电流长期上升趋势和估计失效时刻。同时，仅给出单一点估计不足以支撑健康管理决策，还需要给出剩余寿命的不确定性。因此，进一步将电流退化量对数化，并建立 Wiener 随机退化过程，使 RUL 可由首达时分布表示，从而得到置信区间和短期失效概率。由此，问题一输出飞轮健康阶段、本地退化参数和无迁移 RUL 基线，为问题三提供目标域约束。
+
+\subsection{问题二分析}
+
+问题二是全文的源域支撑，其作用是从轴承全寿命振动数据中提取可迁移的退化形态。轴承振动数据维度高、噪声强、工况差异明显，不能直接把原始振动信号输入迁移模型。其核心任务不是独立完成轴承 RUL 预测，而是构造能够跨设备共享的源域退化表征。为此，应先从时域、频域和时频域提取反映冲击增强、能量迁移和频谱复杂度变化的候选特征，再用单调性、趋势性和鲁棒性筛选最适合描述退化形态的特征。随后通过主成分分析构造一维健康指数 HI，把高维振动退化压缩为随寿命演化的连续轨迹。该 HI 轨迹在归一化寿命空间中作为问题三的源域形态模板，而非作为独立 RUL 模型的最终输出。
+
+\subsection{问题三分析}
+
+问题三是问题一和问题二的汇合点，本质上是小样本目标域预测问题。附件 2 只有截至 1800 天的飞轮观测，缺少真实失效点；而 XJTU-SY 轴承数据具有完整寿命轨迹，但其时间单位、工况、观测变量均与飞轮不同。因此不能简单复用轴承模型参数，而应先将不同设备的退化轨迹映射到归一化寿命空间，再度量源域与目标域的分布差异。本文采用三层迁移策略：第一层消除时间尺度差异，第二层用附件 1 标定轴承退化形态到飞轮退化形态的映射，第三层根据 MMD 域差异自适应融合源域先验与目标域局部估计。最后，基于迁移后的 RUL 概率分布构造多级预警规则，使健康阶段、失效概率和工程处置建议形成闭环。
+
+\subsection{总体技术路线}
+
+综上，本文并非将三个问题分别孤立求解，而是围绕“机理解释、数据表征、迁移学习、PHM 决策”构建统一框架。飞轮监测数据首先进入问题一，完成退化机理建模、健康阶段划分和 RUL 概率预测，形成目标域本地基线；轴承振动数据进入问题二，完成特征提取、HI 构建和可迁移退化表征，形成源域形态先验；两条支路在问题三汇合，通过归一化寿命空间对齐和参数融合，将轴承全寿命退化形态转化为飞轮 RUL 优化预测，最终服务多级预警决策。
+
+从数据流看，问题一向问题三提供目标域当前退化状态、本地 Wiener 参数、阶段标签和无迁移 RUL；问题二向问题三提供源域 HI 轨迹、退化阶段序列、形态统计量和工况一致性证据。前者保证迁移结果不脱离飞轮实际观测，后者缓解附件 2 缺少完整寿命样本的问题。二者共同支撑最终的“健康评估--寿命预测--风险预警”闭环。
+
+\begin{figure}[H]
+  \centering
+  \setcounter{figure}{1}
+  \resizebox{\textwidth}{!}{%
+  \begin{tikzpicture}[
+    font=\small,
+    node distance=0.70cm and 0.78cm,
+    block/.style={draw, rounded corners=1.5pt, align=center, minimum width=2.55cm, minimum height=0.78cm, inner sep=3pt, fill=white},
+    data/.style={block, fill=gray!10},
+    qone/.style={block, fill=blue!7, draw=blue!55!black},
+    qtwo/.style={block, fill=orange!9, draw=orange!65!black},
+    qthree/.style={block, fill=green!8, draw=green!45!black},
+    outputbox/.style={block, fill=yellow!12, draw=yellow!45!black, minimum width=3.2cm},
+    arrow/.style={-Latex, line width=0.6pt},
+    note/.style={align=center, font=\footnotesize}
+  ]
+    \node[data] (fw) {飞轮监测数据\\电流、温度、转速};
+    \node[qone, right=of fw] (q1a) {Q1 飞轮退化建模\\指数机理 + Wiener};
+    \node[qone, right=of q1a] (stage) {健康阶段划分\\退化进度 + 速率};
+    \node[qone, right=of stage] (rul1) {RUL 概率预测\\本地目标域基线};
+
+    \node[data, below=1.35cm of fw] (bearing) {轴承振动数据\\XJTU-SY 全寿命};
+    \node[qtwo, right=of bearing] (q2a) {Q2 特征提取\\时域、频域、时频域};
+    \node[qtwo, right=of q2a] (hi) {HI 构建\\可迁移健康表征};
+    \node[qtwo, right=of hi] (source) {源域退化形态\\工况一致性分析};
+
+    \node[qthree, below=1.25cm of rul1] (q3a) {Q3 跨域退化迁移\\源域支撑 + 目标域基础};
+    \node[qthree, right=of q3a] (align) {归一化寿命空间\\$\tau=t/T_{\mathrm{EOL}}$ 对齐};
+    \node[qthree, right=of align] (fusion) {参数融合\\MMD 加权};
+    \node[qthree, right=of fusion] (rul3) {RUL 优化预测\\迁移后分布};
+    \node[outputbox, right=of rul3] (warn) {多级预警决策\\健康评估--寿命预测--风险预警};
+
+    \draw[arrow] (fw) -- (q1a);
+    \draw[arrow] (q1a) -- (stage);
+    \draw[arrow] (stage) -- (rul1);
+    \draw[arrow] (bearing) -- (q2a);
+    \draw[arrow] (q2a) -- (hi);
+    \draw[arrow] (hi) -- (source);
+    \draw[arrow] (rul1) -- node[note, right, xshift=1pt] {目标域\\本地基础} (q3a);
+    \draw[arrow] (source) -- node[note, right, xshift=1pt] {源域\\形态支撑} (q3a);
+    \draw[arrow] (q3a) -- (align);
+    \draw[arrow] (align) -- (fusion);
+    \draw[arrow] (fusion) -- (rul3);
+    \draw[arrow] (rul3) -- (warn);
+
+    \node[note, above=0.18cm of q1a] {机理 + 数据};
+    \node[note, below=0.18cm of hi] {跨域共享退化形态};
+    \node[note, below=0.18cm of fusion] {迁移学习};
+    \node[note, below=0.18cm of warn] {PHM 闭环};
+  \end{tikzpicture}
+  }
+  \caption{本文总体技术路线图}
+  \label{fig:overall_roadmap}
+\end{figure}
+
+图 \ref{fig:overall_roadmap} 展示了本文的总体技术路线。图中上支路为飞轮目标域主线：由监测数据进入 Q1，依次完成退化建模、阶段划分和 RUL 概率预测，其输出作为 Q3 的目标域基础。下支路为轴承源域主线：由振动数据进入 Q2，完成特征提取与 HI 构建，并形成可迁移退化表征，其输出作为 Q3 的源域支撑。两条箭头在 Q3 汇合，表示跨域迁移并非单独替代飞轮模型，而是在飞轮本地证据约束下吸收轴承全寿命退化形态。随后，归一化寿命空间对齐解决时间尺度差异，MMD 加权参数融合控制迁移强度，迁移后的 RUL 分布最终进入多级预警决策。由此，全文逻辑从数据出发，经退化建模与迁移预测，落到健康管理闭环。
+
+因此，后续第三章的模型建立将严格沿图 \ref{fig:overall_roadmap} 展开：先建立 Q1 的飞轮退化与概率 RUL 模型，再构建 Q2 的可迁移 HI 表征，最后在 Q3 中完成跨域对齐、参数融合和预警决策。第五章模型检验也将围绕该路线设置截断预测、对比实验、消融实验与迁移有效性可视化，以验证各环节在闭环中的作用。

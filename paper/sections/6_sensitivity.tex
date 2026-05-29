@@ -1,6 +1,8 @@
-\section{模型的灵敏度分析}\label{sec:sensitivity}
+\section{模型的评价与推广}\label{sec:sensitivity}
 
-\subsection{综合扰动结果}
+\subsection{灵敏度分析}
+
+\subsubsection{综合扰动结果}
 
 本文围绕三问关键接口开展敏感性分析（设计依据见 \texttt{model/敏感性分析设计.md}）。综合结果见表~\ref{tab:sens_summary}。
 
@@ -17,14 +19,14 @@
   \end{tabular}
 \end{table}
 
-\subsection{问题一敏感性}
+\subsubsection{问题一敏感性}
 
-<对 Q1 关键超参数扰动结果的分析>
+问题一主要考察失效阈值 $i_F$、阶段阈值 $\theta_H,\theta_F$ 以及对数化偏置 $\epsilon$ 对 RUL 和阶段标签的影响。若小范围扰动只改变 RUL 数值而不改变健康阶段结论，则说明模型判断具有稳健性；若阶段标签随阈值轻微变化而频繁跳变，则需在论文中将该区域标注为阶段过渡区。
 
-\subsection{问题二敏感性}
+\subsubsection{问题二敏感性}
 
-<对 Q2 关键参数 / 权重的扰动分析>
+问题二主要考察特征评分权重 $(w_1,w_2,w_3)$、平滑窗口 $W_{\mathrm{smooth}}$、入选特征数 $N_{\mathrm{top}}$ 和 HI 失效阈值 $\mathrm{HI}_F$。重点观察 Top 特征集合、HI 单调性和首次报警时刻是否稳定，以判断健康指数构造是否过度依赖单一特征或单一超参数。
 
-\subsection{问题三敏感性}
+\subsubsection{问题三敏感性}
 
-<对 Q3 关键决策变量 / 外部成本扰动的分析>
+问题三主要考察 MMD 阈值、迁移融合带宽 $h$ 以及预警概率阈值 $P(\mathrm{RUL}<30)$、$P(\mathrm{RUL}<90)$、$P(\mathrm{RUL}<180)$。若 $h$ 增大导致源域权重过高而 RUL 偏离附件 2 本地趋势，则说明迁移应保持保守；若概率阈值扰动不改变当前预警等级，则说明预警结论可靠。

@@ -1,11 +1,11 @@
-\section{模型假设}
+\section{模型假设与符号说明}
 
 \begin{enumerate}[label=\arabic*.]
-    \item <假设 1：一句话陈述并指明依据>
-    \item <假设 2>
-    \item <假设 3>
-    \item <假设 4>
-    \item <假设 5>
+    \item \textbf{准稳态假设}：寿命预测关注长期累积磨损，飞轮额定转速附近的惯性项 $J\dot\omega$ 可忽略，电流主要用于平衡轴承稳态摩擦力矩。
+    \item \textbf{指数退化假设}：润滑剂挥发、分解和润滑膜变薄使摩擦力矩随寿命呈指数型上升，相应电流退化可写为 $i(t)=i_0+\alpha(e^{\beta t}-1)+\varepsilon_t$。
+    \item \textbf{随机退化假设}：对数化退化变量 $X(t)$ 的增量近似服从独立高斯分布，可用带漂移 Wiener 过程描述。
+    \item \textbf{机理同源假设}：XJTU-SY 外圈失效轴承与飞轮轴承摩擦退化均体现为润滑退化诱发的健康状态单调劣化，可在归一化寿命空间内进行迁移。
+    \item \textbf{温度二阶效应假设}：附件观测温度变化范围较小，温度对摩擦退化的影响作为二阶因素处理，不单独建立温度驱动模型。
 \end{enumerate}
 
 \subsection{符号说明}
@@ -20,8 +20,16 @@
     \toprule
     符号 & 含义 & 单位 \\
     \midrule
-    $<符号>$ & <含义> & <单位> \\
-    $<符号>$ & <含义> & <单位> \\
+    $i(t)$ & 飞轮电机电流 & A \\
+    $i_0$ & 初始健康电流 & A \\
+    $i_F$ & 飞轮失效电流阈值 & A \\
+    $\alpha,\beta$ & 指数退化模型尺度参数与速率参数 & A，$1/\mathrm d$ \\
+    $X(t)$ & 对数化退化变量 & -- \\
+    $\mu,\sigma^2$ & Wiener 过程漂移率与扩散率 & 依时间尺度而定 \\
+    $\mathrm{HI}_b(t)$ & 第 $b$ 个轴承的健康指数 & -- \\
+    $\tau$ & 归一化寿命 & -- \\
+    $\mathrm{RUL}$ & 剩余使用寿命 & d \\
+    $\lambda$ & 跨域迁移融合权重 & -- \\
     \bottomrule
   \end{tabular}
 \end{table}

@@ -1,52 +1,577 @@
 \section{模型的建立与求解}
 
-\subsection{问题一}
+承接图 \ref{fig:overall_roadmap} 的总体技术路线，本章按“目标域退化建模--源域健康表征--跨域迁移预警”的顺序建立模型。本题的核心不是对单一时间序列作经验外推，而是围绕“飞轮电流退化--轴承健康表征--跨域健康预警”建立一套可解释、可迁移、可给出不确定性的退化建模框架。根据题目数据结构，本文将四项任务归并为三类模型：问题一针对反作用飞轮建立物理指数退化模型与 Wiener 概率退化模型；问题二从 XJTU-SY 轴承振动数据中构造可迁移健康指数，提取跨域共享退化形态；问题三在前两问的基础上进行轴承到飞轮的跨域迁移，并由剩余寿命分布构造多级预警机制。
 
-\subsubsection{数据预处理}
+三个问题之间的接口关系如下：问题一输出飞轮目标域的局部退化参数、阶段标签和基准剩余寿命；问题二输出源域轴承的健康指数轨迹、阶段标签、形态统计量和可迁移特征集合；问题三将二者统一到归一化寿命空间，通过时间尺度对齐、形态对齐和加权融合得到迁移后的飞轮退化参数，进而给出最终 RUL 及预警等级。
 
-<描述数据清洗、缺失值处理、特征构造，结果与 \texttt{code/src/data/pipeline.py} 一致>
+\subsection{问题一：飞轮退化建模与健康评估}
 
-\subsubsection{模型建立}
+\subsubsection{退化信号构造与物理基础}
 
-<描述选用模型与公式>
-
+反作用飞轮在准稳态运行时，角加速度项相对长期摩擦退化效应可忽略，电机输出转矩主要用于平衡轴承摩擦力矩。因此在额定转速附近有
 \begin{equation}
-  \label{eq:q1_main}
-  <Q1 主公式>
+  K_T i(t) \approx T_f^{ss}(t),
+\end{equation}
+其中 $K_T$ 为电机转矩常数，$i(t)$ 为飞轮电流，$T_f^{ss}(t)$ 为稳态摩擦力矩。题目给定润滑退化导致摩擦力矩呈指数增长，故设
+\begin{equation}
+  T_f^{ss}(t)=T_{f0}+\Delta T\bigl(e^{\beta t}-1\bigr).
+\end{equation}
+将其映射到电流空间，得到飞轮物理指数退化模型
+\begin{equation}
+  \label{eq:q1_exp_model}
+  i(t)=i_0+\alpha\bigl(e^{\beta t}-1\bigr)+\varepsilon_t,
+  \qquad
+  \varepsilon_t\sim \mathcal N(0,\sigma_\varepsilon^2),
+\end{equation}
+其中 $i_0=T_{f0}/K_T$ 为初始健康电流，$\alpha=\Delta T/K_T$ 表示全寿命摩擦增量在电流空间中的尺度，$\beta$ 为退化速率。由附件初值取 $i_0=0.1137\ \mathrm{A}$，最大输出电流给出硬失效阈值 $i_F=1.500\ \mathrm{A}$，于是总退化幅度为
+\begin{equation}
+  \Delta i_F=i_F-i_0=1.3863\ \mathrm{A}.
 \end{equation}
 
-\subsubsection{边界处理}
+\noindent\textbf{模型解释：}
+上述推导把“轴承润滑退化--摩擦力矩增大--电机电流升高”连成一条可观测链路。也就是说，本文并不是直接对电流序列做黑箱外推，而是先说明电流为什么可以作为飞轮健康状态的代理变量。式 \eqref{eq:q1_exp_model} 中的指数项刻画退化后期的加速特征，噪声项则保留传感器扰动和短时工况波动。
 
-<对样本不足 / 极端情况的处理逻辑>
+\noindent\textbf{物理含义：}
+$i_0$ 对应健康初始消耗，$\alpha$ 决定从健康到失效的退化幅度，$\beta$ 决定退化加速速度。若 $\beta$ 越大，说明摩擦劣化从缓慢累积转向快速放大的时间越早，飞轮进入高风险阶段的速度也越快。
 
-\subsection{问题二}
-
-\subsubsection{模型建立}
-
+为减小理论基线带来的系统偏差，本文同时构造残差电流
 \begin{equation}
-  \label{eq:q2_obj}
-  \min Z = <Q2 目标函数>
+  \label{eq:q1_res_current}
+  \Delta i_t=i_t-i_t^{\mathrm{theo}},
+\end{equation}
+其中 $i_t^{\mathrm{theo}}$ 为附件中给出的理论电流。残差电流用于阶段识别和突变分析，原始电流用于物理指数模型拟合与失效阈值外推。这样做的原因是：理论电流反映了名义工况下的基准消耗，而长期偏离基准的上升部分更直接对应润滑退化和摩擦增大。
+
+\noindent\textbf{工程意义：}
+原始电流适合判断是否接近硬件极限，残差电流适合发现相对理论工况的异常偏离。二者分工后，模型既能服务寿命外推，也能服务健康状态监测，避免把正常工况消耗误判为退化。
+
+\subsubsection{物理指数模型的参数估计}
+
+对附件 1 的全寿命样本 $\{(t_k,i_k)\}_{k=0}^{K-1}$，利用非线性最小二乘估计模型参数：
+\begin{equation}
+  \label{eq:q1_nlls}
+  \hat{\boldsymbol\theta}_A
+  =
+  \arg\min_{i_0,\alpha,\beta}
+  \sum_{k=0}^{K-1}
+  \left[
+    i_k-i_0-\alpha\bigl(e^{\beta t_k}-1\bigr)
+  \right]^2 ,
+  \qquad
+  \boldsymbol\theta_A=(i_0,\alpha,\beta).
+\end{equation}
+实际计算中固定 $i_0$ 为 day 0 实测值，以减少早期样本较少时的三参数共线性，并约束 $\alpha>0,\beta>0$，保证模型具有单调退化物理含义。拟合后观测噪声方差由残差无偏估计给出：
+\begin{equation}
+  \label{eq:q1_sigma_eps}
+  \hat\sigma_\varepsilon^2
+  =
+  \frac{1}{K-3}
+  \sum_{k=0}^{K-1}
+  \left[
+    i_k-\hat i(t_k)
+  \right]^2 .
 \end{equation}
 
-约束条件：
+\noindent\textbf{模型解释：}
+非线性最小二乘的目标是寻找一条最能解释全寿命电流上升轨迹的指数曲线。固定初始电流并约束参数为正，相当于把估计空间限制在“退化只能累积、不能自发恢复”的物理合理区域内。这样得到的参数不仅数值稳定，而且便于后续解释。
+
+\noindent\textbf{工程意义：}
+参数估计结果可以直接转化为运维指标：$\hat\alpha$ 反映飞轮从健康到失效的电流裕度消耗规模，$\hat\beta$ 反映裕度被消耗的速度，$\hat\sigma_\varepsilon^2$ 则反映电流观测的随机波动水平。若噪声方差较大，单次观测不宜直接触发高等级预警，而应结合趋势和概率判断。
+
+指数模型既能反映润滑状态恶化后摩擦快速上升的非线性趋势，也保留了明确的失效外推公式。令 $i(t)=i_F$，得到失效时刻点估计
+\begin{equation}
+  \label{eq:q1_exp_eol}
+  \hat T_{\mathrm{EOL}}^A
+  =
+  \frac{1}{\hat\beta}
+  \ln\left(1+\frac{i_F-i_0}{\hat\alpha}\right),
+  \qquad
+  \widehat{\mathrm{RUL}}^A(t^\star)=\hat T_{\mathrm{EOL}}^A-t^\star .
+\end{equation}
+当 $\hat\beta$ 足够接近 0 时，$e^{\beta t}-1\approx \beta t$，式 \eqref{eq:q1_exp_model} 自动退化为线性模型 $i(t)\approx i_0+\alpha\beta t$。该边界性质用于检验指数模型是否过度依赖非线性外推。
+
+\noindent\textbf{健康管理意义：}
+式 \eqref{eq:q1_exp_eol} 把退化曲线转化为可执行的寿命指标：当前时刻距离电流上限还有多少天。该点估计适合作为基准 RUL，但它本身不包含不确定性。因此，后续仍需引入概率退化模型，用来回答“未来 30、90 或 180 天内失效概率有多大”这一更贴近预警决策的问题。
+
+\subsubsection{Wiener 概率退化模型}
+
+物理指数模型适合给出可解释曲线，但其本身不直接给出剩余寿命分布。为刻画退化随机性，本文将电流退化量对数化：
+\begin{equation}
+  \label{eq:q1_log_x}
+  X(t)=\ln\bigl(i(t)-i_0+\epsilon\bigr),
+  \qquad \epsilon=10^{-6}.
+\end{equation}
+若电流退化近似满足指数增长，则 $X(t)$ 与 $t$ 近似线性。因此在 $X(t)$ 空间建立 Wiener 漂移退化过程：
+\begin{equation}
+  \label{eq:q1_wiener}
+  X(t)=X(0)+\mu t+\sigma B(t),
+\end{equation}
+其中 $B(t)$ 为标准布朗运动，$\mu$ 表示平均退化漂移率，$\sigma^2$ 表示随机波动强度。
+
+\noindent\textbf{模型解释：}
+对数变换的作用是把指数型电流增长转化为近似线性的退化过程，使平均退化趋势可以由漂移项 $\mu t$ 表示，而无法完全解释的随机扰动由布朗运动项 $\sigma B(t)$ 表示。这样，模型既保留了问题一的物理退化方向，又允许同一健康状态下存在不同的未来演化路径。
+
+\noindent\textbf{物理含义：}
+$\mu$ 可理解为飞轮摩擦退化在对数空间中的平均推进速度，$\sigma^2$ 则表示退化过程的不稳定程度。若 $\mu$ 较大且 $\sigma^2$ 较小，说明系统正以稳定速度逼近失效；若 $\sigma^2$ 较大，即使均值 RUL 较长，也需要关注短期失效概率的尾部风险。
+
+设观测时刻 $0=t_0<t_1<\cdots<t_K$，记 $\Delta X_k=X(t_k)-X(t_{k-1})$、$\Delta t_k=t_k-t_{k-1}$，则
+\begin{equation}
+  \label{eq:q1_increment}
+  \Delta X_k\sim \mathcal N(\mu\Delta t_k,\sigma^2\Delta t_k).
+\end{equation}
+由高斯增量似然可得闭式极大似然估计：
+\begin{equation}
+  \label{eq:q1_wiener_mle}
+  \hat\mu=\frac{X_K-X_0}{t_K-t_0},
+  \qquad
+  \hat\sigma^2=
+  \frac{1}{K}
+  \sum_{k=1}^{K}
+  \frac{(\Delta X_k-\hat\mu\Delta t_k)^2}{\Delta t_k}.
+\end{equation}
+对应的失效阈值在对数空间为
+\begin{equation}
+  \label{eq:q1_xf}
+  x_F=\ln(i_F-i_0+\epsilon).
+\end{equation}
+
+\noindent\textbf{模型解释：}
+增量形式把整条退化轨迹拆成相邻观测之间的健康状态变化。漂移估计 $\hat\mu$ 由首末状态的平均变化率决定，扩散估计 $\hat\sigma^2$ 则由每段增量偏离平均趋势的程度决定。相比直接拟合终点，这种写法更强调退化过程的连续演化。
+
+\noindent\textbf{工程意义：}
+阈值 $x_F$ 是电流上限在退化空间中的映射。只要当前状态 $x_t$ 与阈值 $x_F$ 的距离逐渐缩小，系统风险就会逐步增加；距离缩小得越快，维护窗口越短。由此，模型可以把传感器电流读数转化为“距离失效边界还有多远”的健康距离。
+
+在当前时刻 $t^\star$，若 $X(t^\star)=x_t$，则 Wiener 过程首次到达阈值 $x_F$ 的时间服从逆高斯分布：
+\begin{equation}
+  \label{eq:q1_ig}
+  \mathrm{RUL}(t^\star)
+  \sim
+  \mathrm{IG}\left(
+    \frac{x_F-x_t}{\hat\mu},
+    \frac{(x_F-x_t)^2}{\hat\sigma^2}
+  \right).
+\end{equation}
+因此剩余寿命的点估计取该分布均值，置信区间取其 $2.5\%$ 与 $97.5\%$ 分位数。该模型的意义在于：同样的电流退化趋势不仅产生一个失效日期，还产生“在未来 $\Delta$ 天内失效的概率”，这正是后续预警规则所需的信息。
+
+\noindent\textbf{健康管理意义：}
+逆高斯分布给出的不是单一寿命日期，而是一组风险信息：均值表示典型剩余寿命，分位数表示不确定性边界，短期累计概率表示预警触发依据。对于航天器飞轮这类高可靠性部件，后者往往比点估计更重要，因为运维决策需要关注低概率但高后果的提前失效事件。
+
+\subsubsection{健康阶段划分}
+
+飞轮健康阶段集合记为 $\mathcal S=\{H,D,F\}$，分别表示健康、退化和衰退阶段。首先定义标准化退化进度
+\begin{equation}
+  \label{eq:q1_phi}
+  \phi_t=\frac{i_t-i_0}{i_F-i_0}.
+\end{equation}
+采用阈值主准则：
+\begin{equation}
+  \label{eq:q1_stage_1}
+  \hat S^{(1)}(t)=
+  \begin{cases}
+  H, & \phi_t<\theta_H,\\
+  D, & \theta_H\le \phi_t<\theta_F,\\
+  F, & \phi_t\ge \theta_F,
+  \end{cases}
+  \qquad
+  \theta_H=0.05,\quad \theta_F=0.50.
+\end{equation}
+
+\noindent\textbf{模型解释：}
+标准化退化进度 $\phi_t$ 将不同量纲的电流读数转换为 $[0,1]$ 附近的健康进度指标，使阶段阈值具有统一含义。$\theta_H$ 对应健康裕度刚开始被明显消耗的边界，$\theta_F$ 对应系统已经进入高风险退化区的边界。
+
+为避免单纯阈值忽略退化速率变化，再由指数模型导出瞬时退化速率
+\begin{equation}
+  \label{eq:q1_velocity}
+  v(t)=\frac{\mathrm d i(t)}{\mathrm d t}
+  =
+  \hat\alpha\hat\beta e^{\hat\beta t}.
+\end{equation}
+取 $v(t)$ 序列的三分位点 $q_{1/3},q_{2/3}$ 构造速率辅助准则：
+\begin{equation}
+  \label{eq:q1_stage_2}
+  \hat S^{(2)}(t)=
+  \begin{cases}
+  H, & v(t)<q_{1/3},\\
+  D, & q_{1/3}\le v(t)<q_{2/3},\\
+  F, & v(t)\ge q_{2/3}.
+  \end{cases}
+\end{equation}
+
+\noindent\textbf{物理含义：}
+退化进度回答“已经退化到哪里”，退化速率回答“正在以多快速度继续退化”。若当前电流尚未达到高阈值，但 $v(t)$ 已经明显增大，则说明系统可能处在加速退化前沿，应提前提高风险等级。
+
+最终阶段采用保守投票：
+\begin{equation}
+  \label{eq:q1_stage_vote}
+  \hat S(t)=
+  \begin{cases}
+  \hat S^{(1)}(t), & \hat S^{(1)}(t)=\hat S^{(2)}(t),\\
+  \max_{\mathrm{risk}}\{\hat S^{(1)}(t),\hat S^{(2)}(t)\}, & \hat S^{(1)}(t)\ne \hat S^{(2)}(t),
+  \end{cases}
+\end{equation}
+其中风险顺序定义为 $H<D<F$。该合并方式使模型在阈值与速率出现分歧时偏向更高风险阶段，符合航天器健康管理的保守原则。
+
+\noindent\textbf{工程意义：}
+阶段划分的目的不是给退化曲线贴标签，而是为后续预警和维护策略提供离散决策入口。健康阶段以持续监测为主，退化阶段需要提高检测频率并更新 RUL，衰退阶段则应重点评估任务风险和替换窗口。因此，问题一最终输出的是“退化曲线、RUL 分布、健康阶段”三类信息，而不是孤立的数学参数。
+
+\subsection{问题二：可迁移健康表征（HI）构建}
+
+\subsubsection{源域振动信号预处理与候选特征集}
+
+问题二在全文中的定位是“源域构建”：从 XJTU-SY 全寿命轴承振动数据中提取可迁移的退化形态，而不是对轴承再独立完成一次 RUL 概率预测。XJTU-SY 数据集中每个轴承按分钟记录一组双通道振动信号，采样频率为 $f_s=25600\ \mathrm{Hz}$，单文件长度 $L_{\mathrm{rec}}=32768$。对每个文件的水平、垂直通道分别去直流：
+\begin{equation}
+  \label{eq:q2_demean}
+  x'[n]=x[n]-\bar x,\qquad n=0,1,\ldots,L_{\mathrm{rec}}-1.
+\end{equation}
+由于故障冲击、宽带能量变化和瞬态频率成分本身是退化信息的重要组成部分，本文不对信号做窄带滤波，而是从时域、频域和时频域提取多尺度特征。特征设计强调“可迁移性”：入选特征不仅要在单个轴承上随寿命变化，还应在不同工况、不同寿命长度的轴承之间呈现相似的退化方向和阶段形态。
+
+候选特征集合 $\mathcal F$ 包含 11 项。时域特征包括均方根、峭度、峰值因子、偏度和峰峰值：
 \begin{align}
-  & <约束 1> \\
-  & <约束 2>
+  F_{\mathrm{RMS}}&=\sqrt{\frac{1}{L}\sum_{n=1}^{L}x[n]^2},\\
+  F_{\mathrm{Kurt}}&=\frac{1}{L}\sum_{n=1}^{L}\left(\frac{x[n]-\bar x}{s_x}\right)^4,\\
+  F_{\mathrm{Crest}}&=\frac{\max_n |x[n]|}{F_{\mathrm{RMS}}},\\
+  F_{\mathrm{Skew}}&=\frac{1}{L}\sum_{n=1}^{L}\left(\frac{x[n]-\bar x}{s_x}\right)^3,\\
+  F_{\mathrm{P2P}}&=\max_n x[n]-\min_n x[n].
 \end{align}
+频域特征基于 Welch 功率谱 $S_x(f)$ 构造：
+\begin{align}
+  F_{\mathrm{peak}}&=\max_f S_x(f),\\
+  F_{\mathrm{high}}&=
+  \frac{\int_{8\mathrm{kHz}}^{12.8\mathrm{kHz}}S_x(f)\,\mathrm df}
+       {\int_0^{12.8\mathrm{kHz}}S_x(f)\,\mathrm df},\\
+  F_{\mathrm{entropy}}&=-\sum_f p(f)\ln p(f),
+  \qquad p(f)=\frac{S_x(f)}{\sum_f S_x(f)}.
+\end{align}
+时频特征包括 4 层 db4 小波包最高频带能量比、HHT 主 IMF 瞬时频率均值，以及 EMD 前 3 阶 IMF 能量比。双通道特征分别计算后取均值，得到每个文件对应的 11 维特征向量。
 
-\subsection{问题三}
+\subsubsection{面向迁移的特征评价指标}
 
-\subsubsection{双层结构}
-
-<描述外层 / 内层职责>
-
-\subsubsection{外层模型}
-
+理想的源域特征应具有三个性质：随退化单调变化、与寿命时间强相关、对局部冲击噪声不敏感。前两者保证特征能够表达健康状态的长期演化，鲁棒性保证特征不会被偶发振动尖峰主导。对任一特征序列 $\{F_k\}_{k=0}^{K-1}$，定义单调性
 \begin{equation}
-  \label{eq:q3_outer}
-  <Q3 外层目标>
+  \label{eq:q2_mon}
+  \mathrm{Mon}(F)=
+  \frac{
+  \left|
+  \#\{k:\Delta F_k>0\}
+  -
+  \#\{k:\Delta F_k<0\}
+  \right|
+  }{K-1},
+\end{equation}
+趋势性
+\begin{equation}
+  \label{eq:q2_trd}
+  \mathrm{Trd}(F)=|\rho_{\mathrm{Spearman}}(F,t)|,
+\end{equation}
+鲁棒性
+\begin{equation}
+  \label{eq:q2_rob}
+  \mathrm{Rob}(F)
+  =
+  \frac{1}{K}
+  \sum_{k=0}^{K-1}
+  \exp\left(
+    -\frac{|F_k-\tilde F_k|}{|F_k|+\delta}
+  \right),
+  \qquad \delta=10^{-6},
+\end{equation}
+其中 $\tilde F_k$ 为窗口长度 $W_{\mathrm{smooth}}=50$ 的滑动平均。综合评价分数为
+\begin{equation}
+  \label{eq:q2_score}
+  S_F=
+  w_1\mathrm{Mon}(F)+w_2\mathrm{Trd}(F)+w_3\mathrm{Rob}(F),
+  \qquad
+  (w_1,w_2,w_3)=(0.4,0.4,0.2).
+\end{equation}
+在全部健康至失效轴承上计算各特征的平均 $S_F$，取排名前三的特征构成可迁移特征集 $\mathcal F^\star$。该策略将特征选择与迁移目标直接绑定：不是选择分类区分度最高的特征，也不是选择最适合某个轴承 RUL 拟合的特征，而是选择最适合形成稳定、连续、跨工况可比退化轨迹的特征。
+
+\subsubsection{可迁移健康指数 HI 构建与轨迹解释}
+
+对轴承 $b$，将 $\mathcal F^\star$ 对应的三维特征矩阵记为
+\begin{equation}
+  \mathbf F_b\in\mathbb R^{K_b\times 3}.
+\end{equation}
+首先对每列做 z-score 标准化：
+\begin{equation}
+  \label{eq:q2_zscore}
+  Z_{b,k,j}=\frac{F_{b,k,j}-\bar F_{b,j}}{s_{b,j}},
+  \qquad j=1,2,3.
+\end{equation}
+然后在该轴承自身的标准化矩阵上做 PCA，取第一主成分：
+\begin{equation}
+  \label{eq:q2_pca}
+  \mathrm{PC1}_b(t_k)=\mathbf z_{b,k}^{\mathsf T}\mathbf u_{b,1},
+\end{equation}
+其中 $\mathbf u_{b,1}$ 为最大特征值对应的单位特征向量。若 $\mathrm{PC1}_b$ 与时间呈负相关，则整体乘以 $-1$ 后再归一化。最终健康指数为
+\begin{equation}
+  \label{eq:q2_hi}
+  \mathrm{HI}_b(t)
+  =
+  \frac{
+    \mathrm{PC1}_b(t)-\min_k \mathrm{PC1}_b(t_k)
+  }{
+    \max_k \mathrm{PC1}_b(t_k)-\min_k \mathrm{PC1}_b(t_k)
+  }
+  \in[0,1].
+\end{equation}
+HI 的物理解释是“轴承由健康状态向失效状态演化的相对进度”。当 $\mathrm{HI}$ 接近 0 时，振动特征仍处于健康基准附近；当 $\mathrm{HI}$ 进入快速上升区时，冲击能量和高频成分开始稳定增强；当 $\mathrm{HI}$ 接近 1 时，轴承进入失效前的剧烈退化阶段。本文选择“单轴承内 PCA”而不是跨轴承统一 PCA，是因为 XJTU-SY 三个工况转速和载荷不同，跨轴承 PCA 容易优先解释工况能量差异，而非退化形态差异。跨工况可比性将在问题三中通过归一化寿命和域差异度量处理。
+
+\subsubsection{HI 退化统计描述与阶段识别}
+
+问题二不将 HI 作为独立 RUL 随机模型的输入，而是对 HI 轨迹进行统计描述和阶段识别，为问题三提供源域形态模板。对每个轴承 $b$，在归一化寿命 $\tau=t/T_{\mathrm{EOL},b}$ 上定义若干形态统计量：
+\begin{align}
+  r_b &= \mathrm{corr}\bigl(\mathrm{HI}_b(\tau),\tau\bigr),\\
+  s_b &= \frac{\mathrm{HI}_b(1)-\mathrm{HI}_b(0)}{1-0},\\
+  c_b &= \arg\max_{\tau}\frac{\mathrm d\,\mathrm{HI}_b(\tau)}{\mathrm d\tau},
+\end{align}
+其中 $r_b$ 衡量 HI 与寿命进度的一致性，$s_b$ 表示单位归一化寿命内的整体退化幅度，$c_b$ 表示退化加速最明显的位置。上述统计量只用于描述源域退化形态，不承担飞轮 RUL 的最终预测功能。
+
+轴承阶段划分采用 3$\sigma$ 报警准则与 PELT 突变检测准则结合。设前 $p_{\mathrm{healthy}}=10\%$ 寿命为健康基准段，健康期 HI 均值和标准差为 $\bar h_b,s_{h,b}$，首次满足
+\begin{equation}
+  \label{eq:q2_alarm}
+  \mathrm{HI}_b(t)>\bar h_b+3s_{h,b}
+\end{equation}
+的时刻记为 $t_{\mathrm{alarm}}$，首次满足 $\mathrm{HI}_b(t)\ge \mathrm{HI}_F$ 的时刻记为 $t_F$，其中 $\mathrm{HI}_F=0.9$，保留 $10\%$ 缓冲以避免单点噪声峰值过早触发失效。则 3$\sigma$ 阶段为
+\begin{equation}
+  \label{eq:q2_stage_sigma}
+  \hat S_b^{(1)}(t)=
+  \begin{cases}
+  H, & t<t_{\mathrm{alarm}},\\
+  D, & t_{\mathrm{alarm}}\le t<t_F,\\
+  F, & t\ge t_F.
+  \end{cases}
+\end{equation}
+PELT 准则则在 HI 序列上寻找两个主要变点 $\hat t_1<\hat t_2$，将三段分别对应 $H,D,F$。两种准则同样采用风险保守投票，得到最终阶段 $\hat S_b(t)$。由此，问题二输出的是源域健康阶段和可迁移退化形态，而不是轴承侧的最终寿命预报。
+
+\subsubsection{工况一致性分析与迁移源筛选}
+
+为支撑后续跨域迁移，需先判断轴承 HI 轨迹是否在不同工况下具有稳定形态。本文固定特征集 $\mathcal F^\star$ 与 HI 构造方法，对三种工况分别统计 $\{r_b,s_b,c_b\}$，并在归一化寿命
+\begin{equation}
+  \label{eq:q2_tau}
+  \tau=\frac{t}{T_{\mathrm{EOL},b}}
+\end{equation}
+上比较 $\mathrm{HI}_b(\tau)$ 的形态。若不同工况下 HI 的原始寿命长度差异显著，但归一化后的上升方向、加速区间和阶段顺序保持一致，则说明载荷和转速主要改变退化速度，而不改变“健康--退化--衰退”的基本路径。这一结论是问题三跨域迁移的关键前提：迁移的不是轴承的绝对寿命，而是退化形态和阶段演化模式。
+
+迁移源轴承限定在外圈失效集合 $\mathcal B^{\mathrm{out}}$ 中，因为飞轮轴承摩擦退化与外圈滚道损伤在机理上更接近。筛选规则为：覆盖高载荷短寿命与低载荷长寿命工况，健康指数单调性不低于 $0.85$，并优先选择寿命跨度差异大的样本，以便迁移模型学习形态与速率之间的映射。
+
+\subsection{问题三：跨域迁移学习与健康预警模型}
+
+\subsubsection{跨域迁移的总体结构}
+
+问题三的目标是利用源域轴承退化规律改进目标域飞轮附件 2 的 RUL 预测。直接复用轴承参数不可行，因为二者时间单位、观测量和工况均不同；完全忽略轴承数据又会浪费外部全寿命样本。为此，本文构造三层迁移框架：
+\begin{equation}
+  \label{eq:q3_layers}
+  \mathrm{L1\ time\ alignment}
+  \longrightarrow
+  \mathrm{L2\ shape\ alignment}
+  \longrightarrow
+  \mathrm{L3\ weighted\ fusion}.
+\end{equation}
+其中 L1 消除分钟与天的时间尺度差异，L2 用附件 1 作为目标域教师样本校正源域退化形态，L3 根据域差异程度自动决定迁移知识和附件 2 自身观测的融合权重。
+
+\subsubsection{L1：归一化寿命空间对齐}
+
+对源域轴承和目标域飞轮均引入归一化寿命坐标：
+\begin{equation}
+  \label{eq:q3_tau}
+  \tau=\frac{t}{T^{\mathrm{EOL}}}\in[0,1].
+\end{equation}
+源域轴承曲线写为
+\begin{equation}
+  \label{eq:q3_source_curve}
+  g_S^{(b)}(\tau)
+  =
+  \mathrm{HI}_b(\tau T_{\mathrm{EOL},b}),
+\end{equation}
+目标域飞轮退化曲线写为
+\begin{equation}
+  \label{eq:q3_target_curve}
+  g_T(\tau)
+  =
+  \frac{i(\tau T_{\mathrm{EOL},T})-i_0}{i_F-i_0}.
+\end{equation}
+源域不再以原始分钟尺度上的寿命参数参与迁移，而是以归一化 HI 轨迹及其形态统计量参与迁移。对每个源域轴承，保留
+\begin{equation}
+  \label{eq:q3_source_shape}
+  \boldsymbol\psi_S^{(b)}
+  =
+  \bigl(r_b,s_b,c_b,\hat S_b(\tau)\bigr),
+\end{equation}
+其中 $r_b$ 表示 HI 与寿命进度的一致性，$s_b$ 表示归一化退化强度，$c_b$ 表示退化加速区位置，$\hat S_b(\tau)$ 表示源域阶段序列。该表示将“绝对寿命预测参数”替换为“跨域共享退化形态”，使不同寿命长度的轴承可在统一尺度上比较。
+
+\subsubsection{域差异度量：MMD 与 CORAL}
+
+迁移是否可信取决于源域和目标域退化形态的相似程度。本文在均匀 $\tau$ 网格上采样退化曲线，设源域样本为 $\{x_i^S\}_{i=1}^{n_S}$，目标域样本为 $\{x_j^T\}_{j=1}^{n_T}$。采用高斯核最大均值差异：
+\begin{equation}
+  \label{eq:q3_mmd}
+  \mathrm{MMD}^2
+  =
+  \frac{1}{n_S^2}\sum_{i,i'}k(x_i^S,x_{i'}^S)
+  +
+  \frac{1}{n_T^2}\sum_{j,j'}k(x_j^T,x_{j'}^T)
+  -
+  \frac{2}{n_Sn_T}\sum_{i,j}k(x_i^S,x_j^T),
+\end{equation}
+其中
+\begin{equation}
+  k(x,y)=\exp\left(-\frac{\|x-y\|^2}{2h_k^2}\right),
+\end{equation}
+$h_k$ 取样本两两距离中位数。MMD 衡量的是源域和目标域在再生核 Hilbert 空间中的均值嵌入差异，越小表示曲线分布越相近。
+
+同时采用二阶矩对齐距离 CORAL：
+\begin{equation}
+  \label{eq:q3_coral}
+  \mathrm{CORAL}(S,T)=\frac{1}{4d^2}\|C_S-C_T\|_F^2,
+\end{equation}
+其中 $C_S,C_T$ 分别为源域与目标域样本协方差矩阵。由于本文对齐后的退化指标为一维，CORAL 实质上比较两域退化曲线波动方差是否一致。若 $\mathrm{MMD}<0.10$，认为迁移具有可接受基础；若超过该阈值，则后续融合权重将趋近于 0，使模型退化为问题一的本地估计。
+
+\subsubsection{L2：形态仿射对齐}
+
+即使源域和目标域具有相似的退化阶段形态，观测量幅度仍可能存在系统偏置。因此用附件 1 的飞轮全寿命早期段作为目标域教师，对源域平均 HI 形态作仿射校正。记源域候选外圈失效轴承平均归一化曲线为 $\bar g_S(\tau)$，附件 1 目标域归一化曲线为 $g_T^{\mathrm{att1}}(\tau)$，在早期网格 $\Omega_E$ 上求解
+\begin{equation}
+  \label{eq:q3_affine_ls}
+  (\hat a,\hat b)
+  =
+  \arg\min_{a,b}
+  \sum_{\tau\in\Omega_E}
+  \left[
+    g_T^{\mathrm{att1}}(\tau)-a\bar g_S(\tau)-b
+  \right]^2 .
+\end{equation}
+由此得到映射后的目标域形态先验。为便于与问题一的飞轮本地退化模型融合，取校正曲线的平均斜率和残差波动作为先验漂移强度与不确定性尺度：
+\begin{equation}
+  \label{eq:q3_l2_param}
+  \mu_T^{\mathrm{L2}}
+  =
+  \frac{g_T^{\mathrm{L2}}(1)-g_T^{\mathrm{L2}}(0)}{1-0},
+  \qquad
+  \sigma_T^{2,\mathrm{L2}}
+  =
+  \mathrm{Var}_{\tau\in\Omega_E}
+  \left[
+    g_T^{\mathrm{att1}}(\tau)-g_T^{\mathrm{L2}}(\tau)
+  \right],
+  \qquad
+  g_T^{\mathrm{L2}}(\tau)=\hat a\,\bar g_S(\tau)+\hat b.
+\end{equation}
+使用附件 1 而非附件 2 估计 $(a,b)$，可以避免把被预测对象的未来信息泄露到迁移模型中。
+
+\subsubsection{L3：基于域差异的加权融合}
+
+L2 输出反映源域知识经形态校正后的先验，问题一在附件 2 上得到的 $(\mu_T^{\mathrm{local}},\sigma_T^{2,\mathrm{local}})$ 反映目标域自身观测。最终参数取二者加权融合：
+\begin{equation}
+  \label{eq:q3_fusion}
+  \hat\mu_T^{\mathrm{TL}}
+  =
+  \lambda\mu_T^{\mathrm{L2}}
+  +(1-\lambda)\mu_T^{\mathrm{local}},
+  \qquad
+  \hat\sigma_T^{2,\mathrm{TL}}
+  =
+  \lambda\sigma_T^{2,\mathrm{L2}}
+  +(1-\lambda)\sigma_T^{2,\mathrm{local}}.
+\end{equation}
+迁移权重定义为
+\begin{equation}
+  \label{eq:q3_lambda}
+  \lambda=\exp\left(-\frac{\mathrm{MMD}^2}{h}\right),
+  \qquad h=1.
+\end{equation}
+该形式具有清晰边界：当源域与目标域几乎一致时，$\mathrm{MMD}\to0$，$\lambda\to1$，模型充分借助轴承全寿命知识；当两域差异显著时，$\lambda\to0$，模型自动回到附件 2 本地退化估计。因而迁移不会无条件覆盖目标域观测，而是由相似性证据控制强弱。
+
+将融合参数由 $\tau$ 空间转换回天尺度：
+\begin{equation}
+  \label{eq:q3_back_day}
+  \mu_T^{\mathrm{day}}
+  =
+  \frac{\hat\mu_T^{\mathrm{TL}}}{\hat T_{\mathrm{EOL},T}},
+  \qquad
+  \sigma_T^{2,\mathrm{day}}
+  =
+  \frac{\hat\sigma_T^{2,\mathrm{TL}}}{\hat T_{\mathrm{EOL},T}}.
+\end{equation}
+再代入 Wiener 首达时分布得到迁移后的 RUL：
+\begin{equation}
+  \label{eq:q3_rul_ig}
+  \widehat{\mathrm{RUL}}^{\mathrm{TL}}
+  \sim
+  \mathrm{IG}\left(
+    \frac{x_F-x_{1800}}{\mu_T^{\mathrm{day}}},
+    \frac{(x_F-x_{1800})^2}{\sigma_T^{2,\mathrm{day}}}
+  \right).
+\end{equation}
+最终报告该分布的均值、$95\%$ 置信区间，以及
+\begin{equation}
+  \label{eq:q3_prob_delta}
+  P_\Delta=P(\mathrm{RUL}<\Delta),
+  \qquad
+  \Delta\in\{30,90,180\}\ \mathrm{days}.
 \end{equation}
 
-\subsubsection{内层模型}
+\subsubsection{迁移效果评价}
 
-<内层与 Q2 的关系；是否复用 Q2 求解模块>
+为避免只比较点估计，本文从误差、置信区间和阶段一致性三个角度评价迁移效果。对附件 1 可在多个截断时刻 $t^\star$ 构造伪在线预测任务，真值为
+\begin{equation}
+  \mathrm{RUL}^{\mathrm{true}}(t^\star)=T_{\mathrm{EOL}}^{\mathrm{att1}}-t^\star.
+\end{equation}
+采用 PHM 非对称损失：
+\begin{equation}
+  \label{eq:q3_phm_score}
+  \mathrm{Score}(\Delta)=
+  \begin{cases}
+  \exp(-\Delta/13)-1, & \Delta<0,\\
+  \exp(\Delta/10)-1, & \Delta\ge0,
+  \end{cases}
+  \qquad
+  \Delta=\widehat{\mathrm{RUL}}-\mathrm{RUL}^{\mathrm{true}}.
+\end{equation}
+该损失对晚预测惩罚更重，符合健康管理中“宁可提前维护，不可错过失效”的原则。若 Q3 相较 Q1 具有更低 Score、更窄或合理的置信区间，并且阶段判别不出现风险逆序，则认为迁移有效。
+
+\subsubsection{多级预警决策模型}
+
+任务四的预警并非单独建模，而是建立在 Q3 的阶段标签和 RUL 概率分布上。设预警等级集合为
+\begin{equation}
+  \mathcal L=\{L_0,L_1,L_2,L_3\},
+\end{equation}
+分别表示正常、关注、告警、紧急。决策规则采用“最高触发等级”原则：
+\begin{equation}
+  \label{eq:q3_warning}
+  \hat L(t)=
+  \max
+  \left\{
+  \begin{array}{ll}
+  L_0, & \hat S(t)=H,\ P(\mathrm{RUL}<180)<0.05,\\
+  L_1, & \hat S(t)=D\ \mathrm{early}\ \mathrm{or}\ P(\mathrm{RUL}<180)\ge0.05,\\
+  L_2, & \hat S(t)=D\ \mathrm{late}\ \mathrm{or}\ P(\mathrm{RUL}<90)\ge0.20,\\
+  L_3, & \hat S(t)=F\ \mathrm{or}\ P(\mathrm{RUL}<30)\ge0.50.
+  \end{array}
+  \right.
+\end{equation}
+其中 $D$ 早期与后期由标准化退化进度划分：
+\begin{equation}
+  \label{eq:q3_d_split}
+  D\ \mathrm{early}:\ 
+  \theta_H\le\phi_t<\frac{\theta_H+\theta_F}{2},
+  \qquad
+  D\ \mathrm{late}:\
+  \frac{\theta_H+\theta_F}{2}\le\phi_t<\theta_F.
+\end{equation}
+
+该预警规则同时满足两个偏序约束：
+\begin{equation}
+  \label{eq:q3_order}
+  \hat S=H\Rightarrow \hat L\le L_1,
+  \qquad
+  \hat S=F\Rightarrow \hat L\ge L_2.
+\end{equation}
+也就是说，健康阶段不会因概率波动被直接判为高危，而衰退阶段也不会因短期概率看似较低而被降为低风险。对附件 2 的 day 1800，当前电流为 $1.0088\ \mathrm A$，标准化退化进度约为
+\begin{equation}
+  \label{eq:q3_phi_1800}
+  \phi_{1800}=
+  \frac{1.0088-0.1137}{1.5-0.1137}
+  \approx0.646,
+\end{equation}
+已超过 $\theta_F=0.50$。因此从阶段阈值看，附件 2 当前至少处于衰退阶段，最终预警等级由式 \eqref{eq:q3_warning} 结合迁移后 RUL 分布进一步确定。
+
+\subsubsection{模型适用边界}
+
+本文模型适用于额定转速附近准稳态工作的 1 Nms 级反作用飞轮，主要刻画由润滑退化和轴承摩擦增加导致的电流上升。若出现控制软件异常、绕组绝缘退化、电机退磁、强瞬态机动或温度大幅超出附件观测范围，则模型假设需要重新检验。对于迁移学习部分，源域仅采用外圈失效轴承；内圈或保持架失效样本不直接参与参数融合，以防将不同故障机理迁移到飞轮退化模型中。

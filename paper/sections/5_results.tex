@@ -1,31 +1,237 @@
 \section{模型检验}
 
-\subsection{问题一模型检验}
+为避免模型检验停留在单一指标罗列，本文按照图 \ref{fig:overall_roadmap} 所示技术路线设计 PHM 验证流程：先构造伪在线截断预测样本，再设置无迁移与迁移模型的对照组，最后通过消融实验和迁移可视化检验各模块的必要性。检验对象不是某一次完整寿命拟合结果，而是模型在不同已观测比例、不同退化阶段和不同跨域对齐强度下的稳定表现。
 
-\subsubsection{一致性检验}
+\subsection{实验设置与验证协议}
 
-<将模型输出与基线 / 已知结论对比>
+\subsubsection{数据划分与截断样本构造}
 
-\subsubsection{核心指标}
+附件 1 飞轮数据具有完整寿命轨迹，可作为目标域验证集；附件 2 飞轮数据只观测到 $1800$ 天，用于最终在线预测与预警；XJTU-SY 轴承数据作为源域，用于构造可迁移 HI 和退化形态先验。为模拟实际 PHM 场景，在附件 1 上构造多时刻截断预测实验。设附件 1 真实失效时刻为 $T_{\mathrm{EOL}}$，取
+\begin{equation}
+  \rho\in\{0.30,0.40,0.50,0.60,0.70,0.80,0.85\},
+  \qquad
+  t^\star_\rho=\rho T_{\mathrm{EOL}} .
+\end{equation}
+在每个 $t^\star_\rho$，模型只能使用 $[0,t^\star_\rho]$ 内的观测数据，预测
+\begin{equation}
+  \mathrm{RUL}^{\mathrm{true}}(t^\star_\rho)
+  =
+  T_{\mathrm{EOL}}-t^\star_\rho .
+\end{equation}
+这种设置可以同时检验早期小样本阶段、中期退化显现阶段和临近失效阶段的预测能力。若模型只在全寿命拟合上表现良好，而在早期截断下误差显著增大，则说明其更像事后曲线拟合，而非真正可用于在线健康管理。
+
+源域轴承数据不直接参与附件 1 截断段的未来观测。问题二输出的 HI 轨迹、阶段标签和形态统计量仅由轴承全寿命样本及附件 1 截断前可见部分校正得到，从而避免将目标域未来失效信息泄露到迁移模型中。
+
+\subsubsection{对比模型设置}
+
+本文设置四类对比模型，覆盖确定性外推、随机退化和迁移退化三种层次。各模型输入保持一致，均只使用截断时刻以前的飞轮观测；差异仅体现在退化形式和是否使用源域 HI 形态先验。
 
 \begin{table}[H]
   \centering
-  \caption{问题一主要指标}
-  \label{tab:q1_metrics}
-  \begin{tabular}{lcccc}
+  \caption{截断预测对比模型}
+  \label{tab:validation_models}
+  \begin{tabularx}{\textwidth}{lXc}
     \toprule
-    模型 & MAE & RMSE & sMAPE & $R^2$ \\
+    模型 & 核心设定 & 输出形式 \\
     \midrule
-    Baseline &  &  &  &  \\
-    本文模型 &  &  &  &  \\
+    Linear & 在电流退化量上拟合线性趋势，作为最简单外推基线 & RUL 点估计 \\
+    Exponential & 采用问题一的物理指数退化模型，刻画摩擦退化加速趋势 & RUL 点估计 \\
+    Wiener & 在对数退化空间建立本地 Wiener 模型，不使用轴承源域信息 & RUL 分布 \\
+    Transfer-Wiener & 在 Wiener 模型中融合轴承 HI 形态先验，并由 MMD 控制迁移权重 & RUL 分布 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+其中 Linear 用于判断非线性建模是否必要，Exponential 用于检验题面物理机理的解释力，Wiener 用于检验不确定性建模收益，Transfer-Wiener 用于检验跨域 HI 迁移是否能在小样本截断阶段改善 RUL 预测。
+
+\subsubsection{评价指标}
+
+设第 $m$ 个截断时刻的预测误差为
+\begin{equation}
+  e_m=\widehat{\mathrm{RUL}}_m-\mathrm{RUL}^{\mathrm{true}}_m .
+\end{equation}
+点预测误差采用 MAE、RMSE 和相对误差：
+\begin{align}
+  \mathrm{MAE} &=
+  \frac{1}{M}\sum_{m=1}^{M}|e_m|,\\
+  \mathrm{RMSE} &=
+  \sqrt{\frac{1}{M}\sum_{m=1}^{M}e_m^2},\\
+  \mathrm{RE} &=
+  \frac{1}{M}\sum_{m=1}^{M}
+  \frac{|e_m|}{\mathrm{RUL}^{\mathrm{true}}_m}.
+\end{align}
+考虑到 PHM 场景中晚预测比早预测风险更高，进一步采用非对称 PHM Score：
+\begin{equation}
+  \mathrm{Score}(e_m)=
+  \begin{cases}
+  \exp(-e_m/13)-1, & e_m<0,\\
+  \exp(e_m/10)-1, & e_m\ge0.
+  \end{cases}
+\end{equation}
+对 Wiener 与 Transfer-Wiener 的概率预测，还统计 $95\%$ 置信区间覆盖率与平均区间宽度：
+\begin{equation}
+  \mathrm{Coverage}_{95}
+  =
+  \frac{1}{M}\sum_{m=1}^{M}
+  \mathbb I\left\{
+  \mathrm{RUL}^{\mathrm{true}}_m\in
+  [L_m^{2.5\%},L_m^{97.5\%}]
+  \right\},
+  \qquad
+  \mathrm{Width}_{95}
+  =
+  \frac{1}{M}\sum_{m=1}^{M}
+  \left(L_m^{97.5\%}-L_m^{2.5\%}\right).
+\end{equation}
+理想模型应同时满足低误差、高覆盖率和不过宽的置信区间；若置信区间过宽，即使覆盖率较高，也说明模型对维护决策支持不足。
+
+\subsection{截断预测实验}
+
+截断预测实验的核心问题是：在不同观测比例下，模型是否能够给出稳定且风险保守的 RUL 估计。实验流程如下：
+
+\begin{enumerate}
+  \item 对每个截断比例 $\rho$，截取附件 1 中 $[0,t^\star_\rho]$ 的飞轮电流序列；
+  \item 分别训练 Linear、Exponential、Wiener 和 Transfer-Wiener；
+  \item 计算 RUL 点估计、概率区间和预警等级；
+  \item 与真实剩余寿命比较，记录误差、PHM Score、区间覆盖率和阶段一致性；
+  \item 汇总早期段 $(\rho\le0.50)$、中期段 $(0.50<\rho\le0.70)$、后期段 $(\rho>0.70)$ 的平均表现。
+\end{enumerate}
+
+\begin{table}[H]
+  \centering
+  \caption{多截断时刻 RUL 预测记录表}
+  \label{tab:truncation_records}
+  \begin{tabularx}{\textwidth}{ccccccX}
+    \toprule
+    截断比例 $\rho$ & 已观测天数 & 真值 RUL & 模型 & 预测 RUL & 相对误差 & 说明 \\
+    \midrule
+    0.30 &  &  & Linear &  &  & 早期趋势弱，检验外推稳定性 \\
+    0.30 &  &  & Exponential &  &  & 检验指数退化机理是否过早放大 \\
+    0.30 &  &  & Wiener &  &  & 检验本地随机模型的不确定性 \\
+    0.30 &  &  & Transfer-Wiener &  &  & 检验 HI 迁移对早期小样本的补偿 \\
+    \midrule
+    0.60 &  &  & 四模型同上 &  &  & 中期退化已出现，检验模型区分度 \\
+    0.85 &  &  & 四模型同上 &  &  & 后期临近失效，检验风险保守性 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+预期上，Linear 在早期可能由于退化信号弱而高估剩余寿命；Exponential 能捕捉加速趋势，但在截断比例较小时可能受参数不确定性影响；Wiener 可给出置信区间，但完全依赖目标域前缀数据；Transfer-Wiener 若在早期和中期取得更低 PHM Score，说明源域 HI 形态确实为目标域小样本预测提供了有效先验。
+
+\subsection{对比实验}
+
+对比实验按模型维度汇总所有截断时刻的平均性能，重点观察三类改进是否逐层成立：Exponential 是否优于 Linear，Wiener 是否在误差接近时提供更合理的不确定性，Transfer-Wiener 是否在不牺牲覆盖率的前提下降低 RUL 误差。
+
+\begin{table}[H]
+  \centering
+  \caption{RUL 截断预测对比实验汇总}
+  \label{tab:comparison_summary}
+  \begin{tabular}{lcccccc}
+    \toprule
+    模型 & MAE & RMSE & RE & PHM Score & Coverage$_{95}$ & Width$_{95}$ \\
+    \midrule
+    Linear &  &  &  &  & -- & -- \\
+    Exponential &  &  &  &  & -- & -- \\
+    Wiener &  &  &  &  &  &  \\
+    Transfer-Wiener &  &  &  &  &  &  \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-\subsection{问题二模型检验}
+若 Transfer-Wiener 的 MAE、RMSE 和 PHM Score 同时低于 Wiener，并且 Coverage$_{95}$ 不低于 Wiener，则说明迁移并非简单缩窄区间或人为调参，而是在保持概率校准的同时提高了寿命预测精度。若 Transfer-Wiener 只在早期截断阶段优势明显，而在后期与 Wiener 接近，也符合 PHM 任务逻辑：随着目标域自身观测变充分，源域先验的边际贡献应逐渐下降。
 
-<对照、退化、约束满足度检验>
+\subsection{消融实验}
 
-\subsection{问题三模型检验}
+为验证迁移框架中各模块的必要性，本文在 Transfer-Wiener 基础上设计三组消融模型：
+\begin{enumerate}
+  \item \textbf{w/o TimeNorm}：移除归一化寿命 $\tau=t/T_{\mathrm{EOL}}$，直接在原始时间尺度上对齐轴承和飞轮退化曲线；
+  \item \textbf{w/o HI-Transfer}：保留飞轮 Wiener 模型与概率预测，但不引入轴承 HI 轨迹和源域形态统计量；
+  \item \textbf{w/o DomainWeight}：保留 HI 迁移，但令融合权重固定，不再根据 MMD 调整源域贡献。
+\end{enumerate}
 
-<对照、敏感性预览、单调性检验>
+\begin{table}[H]
+  \centering
+  \caption{迁移模块消融实验}
+  \label{tab:ablation}
+  \begin{tabularx}{\textwidth}{lccccX}
+    \toprule
+    模型 & MAE & PHM Score & MMD & Coverage$_{95}$ & 性能变化解释 \\
+    \midrule
+    Transfer-Wiener &  &  &  &  & 完整模型 \\
+    w/o TimeNorm &  &  &  &  & 时间尺度不统一，源域寿命形态难以对齐 \\
+    w/o HI-Transfer &  &  &  &  & 退化形态先验缺失，早期截断更依赖本地噪声 \\
+    w/o DomainWeight &  &  &  &  & 域差异不可控，可能出现负迁移 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+消融实验的判据不是单纯观察完整模型是否最好，而是检查性能下降是否与模块功能一致。若 w/o TimeNorm 的 MMD 显著增大，说明归一化寿命空间是跨设备对齐的前提；若 w/o HI-Transfer 的早期 RUL 误差增大，说明问题二构建的 HI 具有迁移价值；若 w/o DomainWeight 在个别截断点出现误差突增，则说明域差异加权能够抑制负迁移。
+
+\subsection{迁移有效性可视化}
+
+除表格指标外，本文通过三类图形验证迁移机制是否真实发挥作用，而不是只在最终误差上偶然改善。
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=11cm,y=4.5cm]
+    \draw[->] (0,0) -- (1.03,0) node[right] {$\tau$};
+    \draw[->] (0,0) -- (0,1.08) node[above] {退化指标};
+    \draw[thick,blue] plot[smooth] coordinates {(0.00,0.04) (0.20,0.08) (0.40,0.16) (0.60,0.35) (0.80,0.68) (1.00,0.96)};
+    \draw[thick,red,dashed] plot[smooth] coordinates {(0.00,0.03) (0.20,0.07) (0.40,0.15) (0.60,0.33) (0.80,0.66) (1.00,0.94)};
+    \draw[thick,gray,dotted] plot[smooth] coordinates {(0.00,0.18) (0.20,0.22) (0.40,0.28) (0.60,0.44) (0.80,0.72) (1.00,1.00)};
+    \node[blue,anchor=west] at (0.62,0.38) {飞轮目标域};
+    \node[red,anchor=west] at (0.62,0.30) {对齐后源域 HI};
+    \node[gray,anchor=west] at (0.55,0.83) {对齐前源域 HI};
+  \end{tikzpicture}
+  \caption{$\tau$ 空间源域 HI 与目标域退化轨迹对齐示意}
+  \label{fig:tau_alignment}
+\end{figure}
+
+图 \ref{fig:tau_alignment} 用于展示时间归一化和形态仿射校正后的轨迹变化。若对齐后源域 HI 的上升方向、加速区间和后期陡升位置与目标域飞轮曲线更接近，则说明问题二提取的并非轴承绝对寿命，而是可迁移的退化形态。
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=1.8cm,y=4.2cm]
+    \draw[->] (0,0) -- (5.3,0) node[right] {迁移阶段};
+    \draw[->] (0,0) -- (0,1.05) node[above] {MMD};
+    \foreach \x/\lab in {1/原始,2/$\tau$对齐,3/形态对齐,4/加权融合}
+      \node[below] at (\x,0) {\lab};
+    \draw[thick,blue,mark=*] plot coordinates {(1,0.78) (2,0.46) (3,0.22) (4,0.14)};
+    \draw[dashed] (0,0.10) -- (5,0.10) node[right] {阈值};
+  \end{tikzpicture}
+  \caption{迁移流程中的 MMD 变化示意}
+  \label{fig:mmd_curve}
+\end{figure}
+
+图 \ref{fig:mmd_curve} 关注域差异是否被逐层降低。若从原始空间到 $\tau$ 空间、再到形态对齐后的 MMD 持续下降，说明迁移模块确实缩小了源域和目标域分布差异；若某一步 MMD 不降反升，则应在消融实验中对应出现性能下降。
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[x=1.4cm,y=0.055cm]
+    \draw[->] (0,0) -- (7.8,0) node[right] {截断比例};
+    \draw[->] (0,0) -- (0,80) node[above] {RUL 绝对误差};
+    \foreach \x/\lab in {1/0.30,2/0.40,3/0.50,4/0.60,5/0.70,6/0.80,7/0.85}
+      \node[below] at (\x,0) {\lab};
+    \draw[thick,gray,mark=square*] plot coordinates {(1,72) (2,60) (3,46) (4,34) (5,28) (6,20) (7,15)};
+    \draw[thick,red,mark=*] plot coordinates {(1,48) (2,40) (3,33) (4,27) (5,23) (6,19) (7,15)};
+    \node[gray,anchor=west] at (4.7,55) {Wiener};
+    \node[red,anchor=west] at (4.7,45) {Transfer-Wiener};
+  \end{tikzpicture}
+  \caption{迁移前后 RUL 误差对比示意}
+  \label{fig:rul_error_compare}
+\end{figure}
+
+图 \ref{fig:rul_error_compare} 用于检验迁移收益随观测比例变化的规律。若 Transfer-Wiener 在早期截断点明显降低误差，而后期逐渐接近 Wiener，说明源域 HI 主要在目标域数据不足时提供形态先验；这种趋势比单个平均误差更能体现迁移学习的实际价值。
+
+\subsection{检验结论判据}
+
+综合以上实验，本文采用以下准则判断模型可信度：
+\begin{enumerate}
+  \item 截断预测中，Transfer-Wiener 的 PHM Score 和 RMSE 应整体低于 Wiener，且早期截断阶段优势更明显；
+  \item 对比实验中，Exponential 应优于 Linear，说明飞轮退化确有非线性加速特征；
+  \item 概率预测中，Transfer-Wiener 的 Coverage$_{95}$ 不应显著低于 Wiener，避免以牺牲不确定性校准换取点误差下降；
+  \item 消融实验中，移除时间归一化、HI 迁移或域差异加权后应出现可解释的性能下降；
+  \item 可视化结果中，$\tau$ 空间轨迹对齐、MMD 下降和 RUL 误差降低三者应相互一致。
+\end{enumerate}
+
+若上述条件同时满足，则说明本文模型不仅能拟合已有退化数据，而且具备 PHM 任务所需的在线预测能力、跨域迁移合理性和预警决策可信度。
