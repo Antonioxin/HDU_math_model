@@ -31,3 +31,10 @@ Q3_sens_mmd_thr,MMD_thr,0.2,see_csv,see_csv
 Q3_sens_warning,warning,宽松,see_csv,see_csv
 Q3_sens_warning,warning,基线,see_csv,see_csv
 Q3_sens_warning,warning,严格,see_csv,see_csv
+Q3_sens_I_F,I_F,1.2,see_csv,see_csv
+Q3_sens_I_F,I_F,1.25,see_csv,see_csv
+Q3_sens_I_F,I_F,1.3,see_csv,see_csv
+Q3_sens_I_F,I_F,1.35,see_csv,see_csv
+Q3_sens_I_F,I_F,1.4,see_csv,see_csv
+Q3_sens_I_F,I_F,1.45,see_csv,see_csv
+Q3_sens_I_F,I_F,1.5,see_csv,see_csv

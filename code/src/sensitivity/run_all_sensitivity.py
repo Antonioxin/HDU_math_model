@@ -32,7 +32,7 @@ TABLES_DIR = RESULTS_DIR / "tables"
 from q1.run_q1 import (
     _exp_model, fit_model_a, predict_rul_model_a,
     _to_X, fit_model_b, predict_rul_wiener,
-    classify_stage_threshold,
+    classify_stage_threshold, _ig_ppf,
 )
 
 
@@ -282,6 +282,67 @@ def run_q3_sens_warning() -> pd.DataFrame:
     return df
 
 
+def run_q3_sens_iF() -> pd.DataFrame:
+    """Q3-S6: 失效阈值映射联动 Q1-S1。
+
+    读取 Q1_sens_I_F 的 i_F 扫描值，用 Q3 迁移参数重算 RUL。
+    """
+    print("\n[Q3-S6] 失效阈值联动扫描...")
+
+    # 读取 Q1 扫描点
+    q1_sens_path = TABLES_DIR / "Q1_sens_I_F.csv"
+    q3_path = TABLES_DIR / "Q3_summary.json"
+    if not q1_sens_path.exists():
+        print("  [SKIP] Q1_sens_I_F.csv 不存在，请先运行 Q1 敏感性")
+        return pd.DataFrame()
+    if not q3_path.exists():
+        print("  [SKIP] Q3_summary.json 不存在，请先运行 Q3")
+        return pd.DataFrame()
+
+    import json
+    with open(q3_path, encoding="utf-8") as f:
+        q3 = json.load(f)
+
+    mu_TL = q3.get("mu_TL", 0)
+    sigma_sq_TL = q3.get("sigma_sq_TL", 0)
+
+    # 加载附件2 当前数据
+    att2 = load_processed("att2_processed.csv")
+    i_current = att2["current"].values[-1]
+
+    df_q1 = pd.read_csv(q1_sens_path)
+    iF_values = df_q1["value"].values
+
+    rows = []
+    for if_val in iF_values:
+        x_f = np.log(max(if_val - I_0, EPS) + EPS)
+        x_t = np.log(max(i_current - I_0, EPS) + EPS)
+        delta_x = x_f - x_t
+
+        if delta_x <= 0 or mu_TL <= 0:
+            rul = 0.0
+            ci_lo, ci_hi = 0.0, 0.0
+        else:
+            m_ig = delta_x / mu_TL
+            lam_ig = delta_x ** 2 / sigma_sq_TL
+            rul = m_ig
+            ci_lo = _ig_ppf(ALPHA_CI / 2, m_ig, lam_ig)
+            ci_hi = _ig_ppf(1 - ALPHA_CI / 2, m_ig, lam_ig)
+
+        rows.append({
+            "param": "I_F",
+            "value": if_val,
+            "RUL_TL": round(rul, 1),
+            "CI_lo_TL": round(ci_lo, 1),
+            "CI_hi_TL": round(ci_hi, 1),
+            "CI_width_TL": round(ci_hi - ci_lo, 1),
+        })
+
+    df = pd.DataFrame(rows)
+    save_result_table(df, "Q3_sens_I_F.csv")
+    return df
+
+
 def main() -> None:
     TABLES_DIR.mkdir(parents=True, exist_ok=True)
     print("=" * 60)
@@ -302,6 +363,7 @@ def main() -> None:
     all_dfs["Q3_sens_h"] = run_q3_sens_bandwidth()
     all_dfs["Q3_sens_mmd_thr"] = run_q3_sens_mmd_thr()
     all_dfs["Q3_sens_warning"] = run_q3_sens_warning()
+    all_dfs["Q3_sens_I_F"] = run_q3_sens_iF()  # Q3-S6 联动 Q1-S1
 
     # 综合汇总
     print("\n" + "=" * 60)
