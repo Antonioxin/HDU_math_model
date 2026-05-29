@@ -1,0 +1,4 @@
+param,config,level
+warning,宽松,L3
+warning,基线,L3
+warning,严格,L3

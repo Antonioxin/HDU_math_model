@@ -1,0 +1,2 @@
+t_current,RUL_TL_days,RUL_Q1_days,RUL_TL_CI_lo,RUL_TL_CI_hi,lambda,MMD,transferable,mu_TL_day,sigma_sq_TL_day,P_RUL_lt_30,P_RUL_lt_90,P_RUL_lt_180,stage,alert_level
+1800,57.5,57.5,0.0,113.9,0.0,0.2482,False,0.007613717688917786,1.4465818804961024,0.9492,0.9716,0.9806,F,L3

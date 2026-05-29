@@ -28,7 +28,10 @@ SRC = CODE / "src"
 
 
 def _run(label: str, script: Path, extra: list[str] | None = None) -> None:
-    """Run a Python script as subprocess; exit on failure."""
+    """Run a Python script as subprocess; exit on failure.
+
+    所有脚本从仓库根目录 (ROOT) 运行，因为内部使用相对导入 (src.xxx).
+    """
     if not script.exists():
         print(f"[跳过] {label}: 脚本不存在 {script}")
         return
@@ -37,7 +40,8 @@ def _run(label: str, script: Path, extra: list[str] | None = None) -> None:
     print(f"[{label}]  {script.relative_to(ROOT)}")
     print(f"{'='*60}")
     t0 = time.perf_counter()
-    result = subprocess.run(cmd, cwd=str(script.parent))
+    # 从 ROOT 运行，确保 `from src.xxx` 等相对导入正确
+    result = subprocess.run(cmd, cwd=str(ROOT))
     elapsed = time.perf_counter() - t0
     if result.returncode != 0:
         print(f"\n[错误] {label} 退出码 {result.returncode}，流程中止。", file=sys.stderr)

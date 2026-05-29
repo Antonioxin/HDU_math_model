@@ -6,6 +6,9 @@ from __future__ import annotations
 
 import matplotlib as mpl
 
+# 非交互式后端（避免 Qt 依赖问题）
+mpl.use("Agg")
+
 
 def apply_style() -> None:
     mpl.rcParams.update({
