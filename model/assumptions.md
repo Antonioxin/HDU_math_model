@@ -48,7 +48,7 @@
 | 符号 | 含义 | 类型 / 范围 | 所属问题 |
 |------|------|-------------|---------|
 | $\hat{\boldsymbol\theta}_A=(i_0,\alpha,\beta,\sigma_\varepsilon^2)$ | 物理指数退化模型参数（飞轮） | 连续，$\beta>0$ | Q1 |
-| $\hat{\boldsymbol\theta}_B=(\mu,\sigma^2)$ | Wiener 漂移退化过程参数（飞轮） | 连续，$\sigma^2>0$ | Q1 |
+| $\hat{\boldsymbol\theta}_B=(\alpha,\beta,\sigma_B^2)$ | Λ-时间 Wiener 退化过程参数（飞轮）；$(\alpha,\beta)$ 共享自模型 A，仅 $\sigma_B^2$ 独立估计 | 连续，$\sigma_B^2>0$ | Q1 |
 | $\hat S_b(t)\in\mathcal{S}$ | 设备 $b$ 在时刻 $t$ 的健康阶段标签 | 离散 3 类 | Q1/Q2/Q3 |
 | $\widehat{\text{RUL}}(t)$ | 时刻 $t$ 处的剩余寿命点估计 | 连续，$\ge 0$，单位：天 | Q1/Q3 |
 | $\widehat{\text{RUL}}^{(\alpha)}(t)$ | RUL 的 $\alpha$ 分位（默认 $\alpha\in\{0.025,0.5,0.975\}$） | 连续 | Q1/Q3 |
@@ -67,7 +67,9 @@
 | $\Delta i_F$ | $i_F - i_0$ | 从初始到失效阈值的总电流增量 |
 | $\tau_b(t)$ | $t / T^{\text{EOL}}_b$ | 归一化寿命（用于跨域对齐），$\tau\in[0,1]$ |
 | $T^{\text{EOL}}_b$ | $\inf\{t: i_t \ge i_F\}$（飞轮）或 $\inf\{t:\text{HI}_t\ge\text{HI}_F\}$（轴承） | 端到端寿命 |
-| $X(t)$ | $\ln(i_t - i_0 + \epsilon)$ | 对数化退化变量（Wiener 模型用） |
+| $D(t)$ | $i_t - i_0$ | 电流退化增量（Λ-时间 Wiener 退化信号） |
+| $\Lambda(t)$ | $\alpha(e^{\beta t}-1)$ | 累积退化均值 = 运行时间（operational time），$\Lambda^{-1}(s)=\frac1\beta\ln(1+s/\alpha)$ |
+| $\sigma_B^2$ | $\frac{1}{K-1}\sum_k(\Delta r_k)^2/\Delta\Lambda_k$，$r_k=D_k-\Lambda(t_k)$ | Λ-时间 Wiener 扩散系数 |
 | $\text{Mon}(F)$ | $\big|\#(\Delta F>0)-\#(\Delta F<0)\big|/(K-1)$ | 特征单调性指标 |
 | $\text{Trd}(F)$ | $\big|\rho_{\text{Spearman}}(F,t)\big|$ | 特征趋势性指标 |
 | $\text{Rob}(F)$ | $\frac{1}{K}\sum_t\exp\big(-\|F_t-\tilde F_t\| / \|F_t\|\big)$ | 特征鲁棒性指标 |
