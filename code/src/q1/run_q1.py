@@ -326,28 +326,25 @@ def main() -> None:
     t2 = att2["day"].values
     i2 = att2["current"].values
 
-    # ── 模型 A: 物理指数 (用附件1 拟合) ──
+    # ── 模型 A: 附件1 全寿命拟合 + 附件2 独立拟合 ──
     print("\n[模型 A] 物理指数退化模型")
-    res_a = fit_model_a(t1, i1)
-    print(f"  α = {res_a['alpha']:.6f} A")
-    print(f"  β = {res_a['beta']:.8f} /day")
-    print(f"  σ_ε² = {res_a['sigma_eps_sq']:.6f}")
-    print(f"  RMSE = {res_a['rmse']:.4f}, R² = {res_a['r2']:.4f}")
-    print(f"  AIC = {res_a['aic']:.1f}, BIC = {res_a['bic']:.1f}")
-    print(f"  NLLS 收敛: {res_a['success']}")
+    res_a = fit_model_a(t1, i1)            # 附件1 全寿命模板
+    res_a_t = fit_model_a(t2, i2)          # ★ 附件2 独立拟合
+    print(f"  附件1: α={res_a['alpha']:.6f}, β={res_a['beta']:.8f}, R²={res_a['r2']:.4f}")
+    print(f"  附件2: α={res_a_t['alpha']:.6f}, β={res_a_t['beta']:.8f}, R²={res_a_t['r2']:.4f}")
 
-    rul_a = predict_rul_model_a(t2[-1], res_a["alpha"], res_a["beta"])
+    # 附件2 RUL 用附件2 自身参数
+    rul_a = predict_rul_model_a(t2[-1], res_a_t["alpha"], res_a_t["beta"])
     print(f"  附件2 RUL (模型A) = {rul_a:.1f} 天")
 
-    # ── 模型 B: Wiener ──
+    # ── 模型 B: Λ-时间 Wiener (附件2 独立参数) ──
     print("\n[模型 B] Λ-时间 Wiener 退化过程")
-    # 复用附件1 模型 A 的 (α, β) 作为 Λ(t) 参数，在附件2 残差上估计 σ_B²
-    res_b = fit_wiener_lambda(t2, i2, res_a["alpha"], res_a["beta"])
+    res_b = fit_wiener_lambda(t2, i2, res_a_t["alpha"], res_a_t["beta"])
     print(f"  σ_B² = {res_b['sigma_B2']:.8f}")
     print(f"  RMSE (残差) = {res_b['rmse']:.4f}, R² = {res_b['r2']:.4f}")
 
     rul_b = predict_rul_lambda_wiener(
-        t2[-1], i2[-1], res_a["alpha"], res_a["beta"], res_b["sigma_B2"]
+        t2[-1], i2[-1], res_a_t["alpha"], res_a_t["beta"], res_b["sigma_B2"]
     )
     print(f"  附件2 RUL (模型B) = {rul_b['RUL']:.1f} 天")
     print(f"  95% CI: [{rul_b['CI_lo']:.1f}, {rul_b['CI_hi']:.1f}]")
@@ -376,9 +373,18 @@ def main() -> None:
     }])
     save_result_table(df_theta_a, "Q1_theta_A.csv")
 
-    # 模型 B 参数表
+    # 模型 A (附件2) 参数表
+    df_theta_a2 = pd.DataFrame([{
+        "i0": I_0, "alpha": res_a_t["alpha"], "beta": res_a_t["beta"],
+        "sigma_eps_sq": res_a_t["sigma_eps_sq"],
+        "rmse": res_a_t["rmse"], "r2": res_a_t["r2"],
+        "aic": res_a_t["aic"], "bic": res_a_t["bic"],
+    }])
+    save_result_table(df_theta_a2, "Q1_theta_A_att2.csv")
+
+    # 模型 B 参数表 (附件2 独立)
     df_theta_b = pd.DataFrame([{
-        "alpha": res_a["alpha"], "beta": res_a["beta"],
+        "alpha": res_a_t["alpha"], "beta": res_a_t["beta"],
         "sigma_B2": res_b["sigma_B2"],
         "rmse": res_b["rmse"], "r2": res_b["r2"],
     }])
@@ -409,7 +415,7 @@ def main() -> None:
             "sigma_eps_sq": float(res_a["sigma_eps_sq"]),
         },
         "theta_B_local": {
-            "alpha": float(res_a["alpha"]), "beta": float(res_a["beta"]),
+            "alpha": float(res_a_t["alpha"]), "beta": float(res_a_t["beta"]),
             "sigma_B2": float(res_b["sigma_B2"]),
         },
         "RUL_A": float(rul_a),
