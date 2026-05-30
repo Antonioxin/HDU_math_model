@@ -435,14 +435,17 @@ def main() -> None:
         e_res = fit_exponential_on_hi(t_min, hi)
         stages = classify_combined(hi)
 
-        print(f"  {bname}: W-R2={w_res['r2']:.2f} E-RMSE={e_res['rmse']:.4f} stage={stages[-1]}")
+        # 指数为主模型, Wiener 仅保留 μ 作速率对比
+        print(f"  {bname}: E-R2={e_res.get('r2',np.nan):.2f} E-RMSE={e_res['rmse']:.4f} "
+              f"mu_W={w_res['mu']:.6f} stage={stages[-1]}")
 
         bearing_results.append({
             "bearing": bname,
-            "mu": w_res["mu"], "sigma_sq": w_res["sigma_sq"],
-            "wiener_rmse": w_res["rmse"], "wiener_r2": w_res["r2"],
+            # 指数退化 (主模型)
             "exp_a": e_res["a"], "exp_b": e_res["b"],
             "exp_rmse": e_res["rmse"], "exp_r2": e_res.get("r2", np.nan),
+            # Wiener 仅作速率对比 (不输出 r2)
+            "wiener_mu": w_res["mu"], "wiener_sigma_sq": w_res["sigma_sq"],
             "final_stage": stages[-1],
             "t_eol": float(t_min[-1]),
         })

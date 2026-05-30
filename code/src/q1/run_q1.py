@@ -129,6 +129,12 @@ def fit_wiener_lambda(t: np.ndarray, i: np.ndarray,
 
     Returns dict: {sigma_B2, rmse, r2}
     """
+    # 2.2 粗网格降采样：日采样 (>200 点) 改 20 天粗网格，对齐附件1 节拍
+    if len(t) > 200:
+        idx = np.arange(0, len(t), 20)
+        t = t[idx]
+        i = i[idx]
+
     D = i - I_0
     Lam = _Lambda(t, alpha, beta)
     r = D - Lam              # 残差
@@ -224,21 +230,30 @@ def predict_rul_lambda_wiener(
 # ═══════════════════════════════════════════════════════════════════════
 
 def _ig_cdf(x: float, m: float, lam: float) -> float:
-    """IG(m, λ) CDF: Φ(√(λ/x)(x/m-1)) + exp(2λ/m)Φ(-√(λ/x)(x/m+1))"""
+    """IG(m, λ) CDF: Φ(z₁) + exp(2λ/m)·Φ(z₂), 大 λ/m 时切对数空间防溢出."""
     if x <= 0:
         return 0.0
     z1 = np.sqrt(lam / x) * (x / m - 1.0)
     z2 = -np.sqrt(lam / x) * (x / m + 1.0)
-    return float(norm.cdf(z1) + np.exp(2.0 * lam / m) * norm.cdf(z2))
+    ratio = 2.0 * lam / m
+    # 对数空间防 exp 溢出 (>700 即超 float64)
+    if ratio > 500.0:
+        from scipy.special import log_ndtr
+        term2 = np.exp(ratio + log_ndtr(z2))
+        return float(norm.cdf(z1) + term2)
+    return float(norm.cdf(z1) + np.exp(ratio) * norm.cdf(z2))
 
 
 def _ig_ppf(q: float, m: float, lam: float) -> float:
-    """IG(m, λ) PPF，数值求根."""
+    """IG(m, λ) PPF，数值求根; 大 λ/m 时用正态近似."""
     if q <= 0:
         return 0.0
     if q >= 1:
         return np.inf
     var_ig = m ** 3 / lam
+    # 大 λ/m: IG → N(m, m³/λ), 直接解析 PPF 防 root-finding 失败
+    if 2.0 * lam / m > 500.0:
+        return float(m + norm.ppf(q) * np.sqrt(var_ig))
     lo, hi = 1e-6, m + 20.0 * np.sqrt(var_ig)
     for _ in range(30):
         if _ig_cdf(hi, m, lam) >= q:

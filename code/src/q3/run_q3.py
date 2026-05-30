@@ -49,7 +49,11 @@ def _ig_cdf(x: float, m: float, lam: float) -> float:
         return 0.0
     z1 = np.sqrt(lam / x) * (x / m - 1.0)
     z2 = -np.sqrt(lam / x) * (x / m + 1.0)
-    return float(norm.cdf(z1) + np.exp(2.0 * lam / m) * norm.cdf(z2))
+    ratio = 2.0 * lam / m
+    if ratio > 500.0:
+        from scipy.special import log_ndtr
+        return float(norm.cdf(z1) + np.exp(ratio + log_ndtr(z2)))
+    return float(norm.cdf(z1) + np.exp(ratio) * norm.cdf(z2))
 
 
 def _ig_ppf(q: float, m: float, lam: float) -> float:
@@ -57,6 +61,11 @@ def _ig_ppf(q: float, m: float, lam: float) -> float:
         return 0.0
     if q >= 1:
         return np.inf
+    # 大 λ/m 时 IG → 正态近似, 直接解析 PPF
+    ratio = 2.0 * lam / m
+    if ratio > 500.0:
+        var_ig = m ** 3 / lam
+        return float(m + norm.ppf(q) * np.sqrt(var_ig))
     var_ig = m ** 3 / lam
     lo, hi = 1e-6, m + 20.0 * np.sqrt(var_ig)
     for _ in range(30):
@@ -331,8 +340,8 @@ def main() -> None:
         for bname in source_bearings:
             row = df_theta[df_theta["bearing"] == bname].iloc[0]
             t_eol = row["t_eol"]
-            mu_source_tau = row["mu"] * t_eol
-            sigma_sq_source_tau = row["sigma_sq"] * t_eol
+            mu_source_tau = row["wiener_mu"] * t_eol
+            sigma_sq_source_tau = row["wiener_sigma_sq"] * t_eol
             mu_source_tau_list.append(mu_source_tau)
             sigma_sq_source_tau_list.append(sigma_sq_source_tau)
 

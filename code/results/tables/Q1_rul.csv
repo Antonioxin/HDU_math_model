@@ -1,2 +1,2 @@
 t_current,RUL_A_days,RUL_B_days,RUL_B_CI_lo,RUL_B_CI_hi,P_RUL_lt_30,P_RUL_lt_90,P_RUL_lt_180,stage
-1800,482.6,472.1,116.4,1127.6,0.0,0.0071,0.1158,F
+1800,482.6,472.1,347.7,617.2,0.0,0.0,0.0,F
