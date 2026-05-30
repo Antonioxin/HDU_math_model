@@ -93,6 +93,43 @@ def main() -> None:
     print(f"图表：  {CODE / 'results' / 'figures'}")
     print("=" * 60)
 
+    # 导出权威结果 JSON 供论文手引用
+    _export_paper_numbers(CODE)
+
+
+def _export_paper_numbers(code_dir: Path) -> None:
+    import json
+    tables = code_dir / "results" / "tables"
+    out = {}
+
+    q1_sum = tables / "Q1_summary.json"
+    if q1_sum.exists():
+        with open(q1_sum, encoding="utf-8") as f:
+            q1 = json.load(f)
+        out["Q1_RUL_A_days"] = q1.get("RUL_A")
+        out["Q1_RUL_B_days"] = q1.get("RUL_B")
+        out["Q1_RUL_CI"] = q1.get("RUL_CI")
+        out["Q1_stage"] = q1.get("stage")
+
+    q2_sum = tables / "Q2_summary.json"
+    if q2_sum.exists():
+        with open(q2_sum, encoding="utf-8") as f:
+            q2 = json.load(f)
+        out["Q2_top_features"] = q2.get("top_features")
+
+    q3_sum = tables / "Q3_summary.json"
+    if q3_sum.exists():
+        with open(q3_sum, encoding="utf-8") as f:
+            q3 = json.load(f)
+        out["Q3_RUL_TL_days"] = q3.get("RUL_TL")
+        out["Q3_RUL_TL_CI"] = q3.get("RUL_TL_CI")
+        out["Q3_alert_level"] = q3.get("alert_level")
+
+    out_path = tables / "_paper_numbers.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(out, f, indent=2, ensure_ascii=False)
+    print(f"[导出] 权威结果: {out_path}")
+
 
 if __name__ == "__main__":
     main()

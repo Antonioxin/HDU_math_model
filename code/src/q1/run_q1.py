@@ -1,10 +1,10 @@
 """Q1 求解入口：飞轮退化建模与健康评估。
 
 实现:
-  - 模型A: 物理指数模型 i(t)=i0+α(e^{βt}-1)+ε, NLLS 估计
-  - 模型B: Wiener 漂移过程 X(t)=X0+μt+σB(t), MLE 闭式解
+  - 模型A: 物理指数模型 i(t)=i0+alpha(e^{beta t}-1)+eps, NLLS 估计
+  - 模型B: Lambda-时间 Wiener 过程 D(t)=Lambda(t)+sigma_B B(Lambda(t))
   - 阶段划分: 残差电流阈值法 + PELT 变点检测
-  - RUL: 逆高斯首达时分布, 点估计 + 95% CI
+  - RUL: Lambda-时间逆高斯首达时, 点估计 + 95% CI
 """
 from __future__ import annotations
 

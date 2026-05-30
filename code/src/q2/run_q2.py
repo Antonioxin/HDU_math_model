@@ -270,7 +270,9 @@ def fit_exponential_on_hi(t: np.ndarray, hi: np.ndarray) -> dict:
         )
         hi_pred = _model(t - t[0], *popt)
         rmse = np.sqrt(np.mean((hi - hi_pred) ** 2))
-        return {"a": popt[0], "b": popt[1], "rmse": rmse}
+        ss_tot = np.sum((hi - np.mean(hi)) ** 2)
+        r2 = 1 - np.sum((hi - hi_pred) ** 2) / ss_tot if ss_tot > 0 else 0
+        return {"a": popt[0], "b": popt[1], "rmse": rmse, "r2": r2}
     except Exception:
         return {"a": np.nan, "b": np.nan, "rmse": np.nan}
 
@@ -433,15 +435,14 @@ def main() -> None:
         e_res = fit_exponential_on_hi(t_min, hi)
         stages = classify_combined(hi)
 
-        print(f"  {bname}: mu={w_res['mu']:.6f}, sigma2={w_res['sigma_sq']:.6f}, "
-              f"RMSE={w_res['rmse']:.4f}, stage={stages[-1]}")
+        print(f"  {bname}: W-R2={w_res['r2']:.2f} E-RMSE={e_res['rmse']:.4f} stage={stages[-1]}")
 
         bearing_results.append({
             "bearing": bname,
             "mu": w_res["mu"], "sigma_sq": w_res["sigma_sq"],
             "wiener_rmse": w_res["rmse"], "wiener_r2": w_res["r2"],
             "exp_a": e_res["a"], "exp_b": e_res["b"],
-            "exp_rmse": e_res["rmse"],
+            "exp_rmse": e_res["rmse"], "exp_r2": e_res.get("r2", np.nan),
             "final_stage": stages[-1],
             "t_eol": float(t_min[-1]),
         })
