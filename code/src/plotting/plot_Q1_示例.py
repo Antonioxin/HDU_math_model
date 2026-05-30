@@ -19,7 +19,7 @@ SRC = ROOT / "code" / "src"
 sys.path.insert(0, str(SRC))
 from data.constants import I_0, I_F, THETA_H, THETA_F
 from data.load_tables import load_processed
-from q1.run_q1 import _exp_model, fit_model_a, predict_rul_wiener, _to_X, fit_model_b
+from q1.run_q1 import _exp_model, fit_model_a, predict_rul_lambda_wiener, fit_wiener_lambda
 
 FIG_DIR = ROOT / "code" / "results" / "figures"
 TABLES_DIR = ROOT / "code" / "results" / "tables"
@@ -50,24 +50,20 @@ def main() -> None:
     ax.legend(fontsize=8)
     ax.set_xlim(0, 3600)
 
-    # ── (b) 附件2 RUL 逆高斯概率密度 ──
-    res_b = fit_model_b(att2["day"].values, att2["current"].values)
-    rul = predict_rul_wiener(
+    # ── (b) 附件2 RUL 概率密度 (Lambda-时间 Wiener) ──
+    res_b = fit_wiener_lambda(att2["day"].values, att2["current"].values,
+                              res_a["alpha"], res_a["beta"])
+    rul = predict_rul_lambda_wiener(
         att2["day"].values[-1], att2["current"].values[-1],
-        res_b["mu"], res_b["sigma_sq"], res_b["X_F"],
+        res_a["alpha"], res_a["beta"], res_b["sigma_B2"],
     )
 
-    from scipy.stats import invgauss
-    if rul["RUL"] > 0:
-        x_rul = np.linspace(max(0, rul["RUL"] - 3 * np.sqrt(rul["RUL"])),
-                            rul["RUL"] + 4 * np.sqrt(rul["RUL"]), 300)
-        m_ig = rul["RUL"]
-        lam_ig = (att2["current"].values[-1] - I_0) ** 2 / res_b["sigma_sq"]
-        try:
-            pdf = invgauss.pdf(x_rul, mu=m_ig / lam_ig, scale=lam_ig)
-        except Exception:
-            from scipy.stats import norm as _norm
-            pdf = _norm.pdf(x_rul, m_ig, np.sqrt(lam_ig))
+    from scipy.stats import norm as _norm
+    if rul["RUL"] > 0 and rul["CI_hi"] > rul["CI_lo"]:
+        x_rul = np.linspace(max(0, rul["CI_lo"] * 0.5),
+                            rul["CI_hi"] * 1.2, 300)
+        sigma_approx = (rul["CI_hi"] - rul["CI_lo"]) / (2 * 1.96)
+        pdf = _norm.pdf(x_rul, rul["RUL"], sigma_approx)
 
         ax = axes[1]
         ax.plot(x_rul, pdf, "b-", lw=1.5)
@@ -78,7 +74,7 @@ def main() -> None:
                         where=(x_rul >= rul["CI_lo"]) & (x_rul <= rul["CI_hi"]))
         ax.set_xlabel("剩余寿命 RUL (天)")
         ax.set_ylabel("概率密度")
-        ax.set_title(f"附件2 RUL 分布 (IG)\n95% CI: [{rul['CI_lo']:.0f}, {rul['CI_hi']:.0f}] 天")
+        ax.set_title(f"附件2 RUL 分布 (Lambda-Wiener)\n95% CI: [{rul['CI_lo']:.0f}, {rul['CI_hi']:.0f}] 天")
         ax.legend(fontsize=8)
 
     fig.tight_layout()

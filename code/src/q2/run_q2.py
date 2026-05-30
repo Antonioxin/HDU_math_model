@@ -31,8 +31,8 @@ sys.path.insert(0, str(SRC))
 from data.constants import (
     F_S_VIB, L_REC, DT_VIB,
     W1, W2, W3, N_TOP, W_SMOOTH,
-    SIGMA_HI_MULT, HI_F, P_HEALTHY, PELT_PEN,
-    BEARINGS_OUTER, MIGRATION_SOURCE_BEARINGS, EPS,
+    HI_ALARM_K, HI_F, P_HEALTHY, BETA_PEN,
+    BEARINGS_OUTER, MIGRATION_SOURCE_BEARINGS,
 )
 from data.load_tables import (
     XJTU_RAW, list_xjtu_bearing_files, load_xjtu_bearing, save_result_table,
@@ -280,12 +280,14 @@ def fit_exponential_on_hi(t: np.ndarray, hi: np.ndarray) -> dict:
 # ============================================================
 
 def classify_stage_3sigma(hi: np.ndarray, p_healthy: float = P_HEALTHY,
-                          k: float = SIGMA_HI_MULT) -> list:
+                          k: float = HI_ALARM_K) -> list:
+    """稳健化报警: median + k·1.4826·MAD 替代 mean + k·σ."""
     n = len(hi)
     n_healthy = max(1, int(n * p_healthy))
-    h_mean = np.mean(hi[:n_healthy])
-    h_std = np.std(hi[:n_healthy])
-    threshold = h_mean + k * h_std
+    h_healthy = hi[:n_healthy]
+    h_median = np.median(h_healthy)
+    h_mad = np.median(np.abs(h_healthy - h_median))
+    threshold = h_median + k * 1.4826 * h_mad  # MAD→σ 一致估计
 
     fail_idx = n
     for i in range(n):
@@ -309,9 +311,15 @@ def classify_stage_3sigma(hi: np.ndarray, p_healthy: float = P_HEALTHY,
     return stages
 
 
-def classify_stage_pelt(values: np.ndarray, pen: float = PELT_PEN) -> list | None:
+def classify_stage_pelt(values: np.ndarray, pen: float | None = None) -> list | None:
+    """自适应 PELT: pen = BETA_PEN * var(residual) * ln(K)."""
     try:
         from ruptures import Pelt
+        if pen is None:
+            smooth = pd.Series(values).rolling(
+                window=min(10, len(values)), min_periods=1, center=True).mean().values
+            resid_var = np.var(values - smooth) if len(values) > 1 else 1.0
+            pen = BETA_PEN * resid_var * np.log(len(values))
         model = Pelt(model="rbf").fit(values.reshape(-1, 1))
         cps = model.predict(pen=pen)
         n = len(values)

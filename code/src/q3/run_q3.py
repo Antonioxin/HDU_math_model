@@ -24,8 +24,8 @@ SRC = ROOT / "code" / "src"
 sys.path.insert(0, str(SRC))
 
 from data.constants import (
-    I_0, I_F, DELTA_I_F, EPS, H_BANDWIDTH, MMD_THR, ALPHA_CI,
-    P_THR_180, P_THR_180_UP, P_THR_90, P_THR_30,
+    I_0, I_F, DELTA_I_F, H_BANDWIDTH, MMD_THR, CORAL_THR, ALPHA_CI,
+    P_THR_180, P_THR_180_UP, P_THR_90, P_THR_30, S_MAX,
     LEVEL_NORMAL, LEVEL_ATTENTION, LEVEL_ALERT, LEVEL_EMERGENCY,
     ALERT_ACTIONS, MIGRATION_SOURCE_BEARINGS, DT2,
 )
@@ -103,11 +103,20 @@ def compute_coral(source: np.ndarray, target: np.ndarray) -> float:
 
 
 def phm_score(delta: np.ndarray) -> float:
-    """PHM Score Function (非对称损失)."""
-    scores = np.where(delta < 0,
-                      np.exp(-delta / 13) - 1,
-                      np.exp(delta / 10) - 1)
-    return float(np.mean(scores))
+    """PHM Score Function (非对称损失), 带数值护栏."""
+    d = np.clip(delta, -130, 130)  # 防 exp 溢出
+    scores = np.where(d < 0,
+                      np.expm1(-d / 13),
+                      np.expm1(d / 10))
+    return float(np.mean(np.minimum(scores, S_MAX)))
+
+
+def minmax_normalize(curve: np.ndarray) -> np.ndarray:
+    """数值轴 min-max 归一化到 [0,1]."""
+    c_min, c_max = curve.min(), curve.max()
+    if c_max - c_min < 1e-12:
+        return np.zeros_like(curve)
+    return (curve - c_min) / (c_max - c_min)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -201,9 +210,11 @@ def main() -> None:
         q1 = json.load(f)
 
     theta_b_local = q1["theta_B_local"]
-    mu_local = theta_b_local["mu"]
-    sigma_sq_local = theta_b_local["sigma_sq"]
-    print(f"\n[Q1 目标域]  mu_local={mu_local:.8f}, sigma2_local={sigma_sq_local:.8f}")
+    # 新格式: alpha, beta, sigma_B2 (Λ-时间 Wiener)
+    alpha_q1 = theta_b_local.get("alpha", 0.598)
+    beta_q1 = theta_b_local.get("beta", 0.000358)
+    sigma_B2_local = theta_b_local.get("sigma_B2", 0.43)
+    print(f"\n[Q1 目标域]  alpha={alpha_q1:.4f}, beta={beta_q1:.8f}, sigma_B2={sigma_B2_local:.6f}")
     print(f"  RUL(Q1)={q1['RUL_B']:.1f} 天, CI=[{q1['RUL_CI'][0]:.1f}, {q1['RUL_CI'][1]:.1f}]")
 
     # ── 加载附件1/2 ──
@@ -242,9 +253,12 @@ def main() -> None:
                 continue
             source_hi = normalize_to_tau(
                 b_data["tau"].values * 100, b_data["HI"].values
-            )  # 去归一化再归一化到统一网格
-            mmd_val = compute_mmd(source_hi, g_target_att1)
-            coral_val = compute_coral(source_hi, g_target_att1)
+            )
+            # 数值轴 min-max 归一化
+            source_hi_norm = minmax_normalize(source_hi)
+            target_norm = minmax_normalize(g_target_att1)
+            mmd_val = compute_mmd(source_hi_norm, target_norm)
+            coral_val = compute_coral(source_hi_norm, target_norm)
             mmd_results[bname] = {"MMD": float(mmd_val), "CORAL": float(coral_val)}
             print(f"  {bname}: MMD={mmd_val:.4f}, CORAL={coral_val:.8f}")
 
@@ -256,9 +270,10 @@ def main() -> None:
         best_source = "Bearing3_1"
         best_mmd = 999.0
 
-    transferable = best_mmd < MMD_THR
-    print(f"\n  最佳源轴承: {best_source}, MMD={best_mmd:.4f}")
-    print(f"  可迁移性: {'✓ 可迁移' if transferable else '✗ 不可迁移 (退化为 Q1 输出)'}")
+    transferable = (best_mmd < MMD_THR) and (mmd_results.get(best_source, {}).get("CORAL", 999) < CORAL_THR)
+    print(f"\n  最佳源轴承: {best_source}, MMD_norm={best_mmd:.4f}, CORAL={mmd_results.get(best_source, {}).get('CORAL', 999):.6f}")
+    transfer_mark = "OK" if transferable else "FAIL"
+    print(f"  可迁移性: {transfer_mark}  (判据: CORAL<{CORAL_THR} and MMD<{MMD_THR})")
 
     df_mmd = pd.DataFrame([
         {"bearing": b, "MMD": v["MMD"], "CORAL": v["CORAL"]}
@@ -273,36 +288,35 @@ def main() -> None:
 
     a_hat, b_hat = 1.0, 0.0
     if df_hi_norm is not None and mmd_results:
-        # 模型要求: 用候选轴承均值 ḡ_S(τ)，而非单个最佳轴承
         tau_grid = np.linspace(0, 1, 50)
         source_curves = []
         for bname in MIGRATION_SOURCE_BEARINGS:
             b_data = df_hi_norm[df_hi_norm["bearing"] == bname]
             if len(b_data) < 10:
                 continue
-            # 源轴承 HI 归一化到 τ 空间
             source_tau = b_data["tau"].values
             source_hi = b_data["HI"].values
-            # τ 已在 [0,1]，重新插值到统一 50 点网格
             curve = np.interp(tau_grid, source_tau, source_hi)
             source_curves.append(curve)
 
         if source_curves:
-            g_bar_S = np.mean(source_curves, axis=0)  # ḡ_S(τ) 候选轴承均值
+            g_bar_S = np.mean(source_curves, axis=0)
+            # 数值轴归一化后再做仿射
+            g_bar_S_norm = minmax_normalize(g_bar_S)
+            target_norm = minmax_normalize(g_target_att1)
 
-            # 模型要求: 用附件1 前 1000 天（早期段）估计仿射参数
             t1 = att1["day"].values
             early_mask = t1 <= 1000.0
             if np.any(early_mask):
-                # 目标域: 附件1 早期段 φ 曲线
                 phi_early = (att1["current"].values[early_mask] - I_0) / DELTA_I_F
                 t_early = t1[early_mask]
                 tau_early = (t_early - t_early[0]) / (t_early[-1] - t_early[0])
                 target_early = np.interp(tau_grid, tau_early, phi_early)
+                target_early_norm = minmax_normalize(target_early)
 
                 a_hat, b_hat = estimate_affine(
-                    tau_grid, g_bar_S,
-                    tau_grid, target_early,
+                    tau_grid, g_bar_S_norm,
+                    tau_grid, target_early_norm,
                 )
             print(f"  使用 {len(source_curves)} 个源轴承均值 + 附件1 前1000天")
     print(f"  a = {a_hat:.4f}, b = {b_hat:.4f}")
@@ -326,8 +340,8 @@ def main() -> None:
             mu_bar_s_tau = float(np.mean(mu_source_tau_list))
             sigma_sq_bar_s_tau = float(np.mean(sigma_sq_source_tau_list))
         else:
-            mu_bar_s_tau = mu_local * T_att1_est
-            sigma_sq_bar_s_tau = sigma_sq_local * T_att1_est
+            mu_bar_s_tau = 0.0
+            sigma_sq_bar_s_tau = 0.0
     else:
         mu_bar_s_tau = 0.0
         sigma_sq_bar_s_tau = 0.0
@@ -336,9 +350,9 @@ def main() -> None:
     mu_T_L2 = a_hat * mu_bar_s_tau + b_hat
     sigma_sq_T_L2 = a_hat ** 2 * sigma_sq_bar_s_tau
 
-    print(f"  mu_S_bar(tau)={mu_bar_s_tau:.6f}, sigma²_S_bar(tau)={sigma_sq_bar_s_tau:.6f}")
+    print(f"  mu_S_bar(tau)={mu_bar_s_tau:.6f}, sigma2_S_bar(tau)={sigma_sq_bar_s_tau:.6f}")
     print(f"  mu_T_L2 = {mu_T_L2:.6f}")
-    print(f"  sigma²_T_L2 = {sigma_sq_T_L2:.8f}")
+    print(f"  sigma2_T_L2 = {sigma_sq_T_L2:.8f}")
 
     # ── 附件2 局部估计 (转 tau 空间) ──
     t2 = att2["day"].values
@@ -351,12 +365,12 @@ def main() -> None:
         beta_a = df_theta_a["beta"].values[0]
         T_att2_est = np.log(1.0 + DELTA_I_F / alpha_a) / beta_a if beta_a > 0 else 3000.0
     else:
-        T_att2_est = 3500.0  # 回退到附件1 全寿命
-    mu_local_tau = mu_local * T_att2_est
-    sigma_sq_local_tau = sigma_sq_local * T_att2_est
-    print(f"\n  目标域 T̂_EOL (模型A外推) = {T_att2_est:.0f} 天")
-    print(f"  目标域(附件2) tau空间: mu_local_tau={mu_local_tau:.6f}, "
-          f"sigma²_local_tau={sigma_sq_local_tau:.8f}")
+        T_att2_est = 3500.0
+
+    # Λ-time 局部参数
+    sigma_local_tau = sigma_B2_local * T_att2_est
+    print(f"\n  目标域 T_EOL (模型A外推) = {T_att2_est:.0f} 天")
+    print(f"  目标域 sigma2_local_tau={sigma_local_tau:.8f}")
 
     # ── L3: 加权融合 ──
     print("\n" + "=" * 60)
@@ -364,44 +378,25 @@ def main() -> None:
     print("=" * 60)
 
     lam = np.exp(-best_mmd ** 2 / H_BANDWIDTH) if transferable else 0.0
-    print(f"  λ = exp(-MMD²/h) = {lam:.4f}")
+    print(f"  lam = exp(-MMD2/h) = {lam:.4f}")
 
-    mu_TL_tau = lam * mu_T_L2 + (1 - lam) * mu_local_tau
-    sigma_sq_TL_tau = lam * sigma_sq_T_L2 + (1 - lam) * sigma_sq_local_tau
-    print(f"  mu_TL(tau) = {mu_TL_tau:.6f}")
-    print(f"  sigma²_TL(tau) = {sigma_sq_TL_tau:.8f}")
+    sigma_TL_tau = lam * sigma_sq_T_L2 + (1 - lam) * sigma_local_tau
+    sigma_TL_day = sigma_TL_tau / T_att2_est
+    print(f"  sigma2_TL(tau) = {sigma_TL_tau:.8f}")
+    print(f"  sigma2_TL(day) = {sigma_TL_day:.8f}")
 
-    # 转换回天单位
-    mu_TL_day = mu_TL_tau / T_att2_est
-    sigma_sq_TL_day = sigma_sq_TL_tau / T_att2_est
-    print(f"  mu_TL(day) = {mu_TL_day:.8f}")
-    print(f"  sigma²_TL(day) = {sigma_sq_TL_day:.8f}")
-
-    # ── 迁移后 RUL ──
+    # ── 迁移后 RUL: 用 Lambda-时间 Wiener ──
     print("\n" + "=" * 60)
     print("迁移后 RUL 推断")
     print("=" * 60)
 
-    X_F = np.log(max(I_F - I_0, EPS) + EPS)
-    x_t = _to_X(np.array([i2[-1]]))[0]
-    delta_x = X_F - x_t
-
-    if delta_x <= 0 or mu_TL_day <= 0:
-        print("  [WARN] 退化已达或超过失效阈值")
-        rul_tl = 0.0
-        ci_lo, ci_hi = 0.0, 0.0
-        p30, p90, p180 = 1.0, 1.0, 1.0
-    else:
-        m_ig = delta_x / mu_TL_day
-        lam_ig = delta_x ** 2 / sigma_sq_TL_day
-        rul_tl = m_ig
-        ci_lo = _ig_ppf(ALPHA_CI / 2, m_ig, lam_ig)
-        ci_hi = _ig_ppf(1 - ALPHA_CI / 2, m_ig, lam_ig)
-
-        def _p(days):
-            return _ig_cdf(days, m_ig, lam_ig)
-        p30, p90, p180 = _p(30), _p(90), _p(180)
-
+    from q1.run_q1 import predict_rul_lambda_wiener
+    rul_tl_dict = predict_rul_lambda_wiener(
+        t2[-1], i2[-1], alpha_q1, beta_q1, sigma_TL_day
+    )
+    rul_tl = rul_tl_dict["RUL"]
+    ci_lo, ci_hi = rul_tl_dict["CI_lo"], rul_tl_dict["CI_hi"]
+    p30, p90, p180 = rul_tl_dict["P_30"], rul_tl_dict["P_90"], rul_tl_dict["P_180"]
     print(f"  RUL(TL) = {rul_tl:.1f} 天")
     print(f"  95% CI: [{ci_lo:.1f}, {ci_hi:.1f}]")
     print(f"  P(RUL<30)={p30:.4f}, P(RUL<90)={p90:.4f}, P(RUL<180)={p180:.4f}")
@@ -436,24 +431,13 @@ def main() -> None:
             ic = i1_arr[idx]
             true_rul = T_eol_att1 - tc
 
-            # Q1: 用 Q1 参数预测
-            from data.constants import I_0 as I0
-            xc = np.log(max(ic - I0, EPS) + EPS)
-            dx = X_F - xc
-            if dx > 0 and q1["theta_B_local"]["mu"] > 0:
-                m_q1 = dx / q1["theta_B_local"]["mu"]
-                pred_q1 = m_q1
-            else:
-                pred_q1 = 0.0
-            deltas_q1.append(pred_q1 - true_rul)
+            # Q1: 用 Lambda-时间 Wiener
+            r1 = predict_rul_lambda_wiener(tc, ic, alpha_q1, beta_q1, sigma_B2_local)
+            deltas_q1.append(r1["RUL"] - true_rul)
 
-            # Q3: 用迁移参数预测
-            if dx > 0 and mu_TL_day > 0:
-                m_q3 = dx / mu_TL_day
-                pred_q3 = m_q3
-            else:
-                pred_q3 = 0.0
-            deltas_q3.append(pred_q3 - true_rul)
+            # Q3: 用迁移参数
+            r3 = predict_rul_lambda_wiener(tc, ic, alpha_q1, beta_q1, sigma_TL_day)
+            deltas_q3.append(r3["RUL"] - true_rul)
 
         if deltas_q1:
             score_q1 = phm_score(np.array(deltas_q1))
@@ -507,8 +491,7 @@ def main() -> None:
         "lambda": round(lam, 4),
         "MMD": round(best_mmd, 4),
         "transferable": transferable,
-        "mu_TL_day": float(mu_TL_day),
-        "sigma_sq_TL_day": float(sigma_sq_TL_day),
+        "sigma_B2_TL": float(sigma_TL_day),
         "P_RUL_lt_30": round(p30, 4),
         "P_RUL_lt_90": round(p90, 4),
         "P_RUL_lt_180": round(p180, 4),
@@ -524,8 +507,7 @@ def main() -> None:
         "lambda": float(lam),
         "MMD": float(best_mmd),
         "transferable": transferable,
-        "mu_TL": float(mu_TL_day),
-        "sigma_sq_TL": float(sigma_sq_TL_day),
+        "sigma_B2_TL": float(sigma_TL_day),
         "stage": stage_q1,
         "alert_level": alert_level,
         "probabilities": {

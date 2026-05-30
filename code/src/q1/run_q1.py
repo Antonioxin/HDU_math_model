@@ -24,8 +24,8 @@ SRC = ROOT / "code" / "src"
 sys.path.insert(0, str(SRC))
 
 from data.constants import (
-    I_0, I_F, DELTA_I_F, EPS, THETA_H, THETA_F,
-    ALPHA_0, BETA_0, ALPHA_CI, PELT_PEN, DT2,
+    I_0, I_F, DELTA_I_F, THETA_H, THETA_F,
+    ALPHA_0, BETA_0, ALPHA_CI, BETA_PEN, DT2,
 )
 from data.load_tables import load_processed, save_result_table
 
@@ -107,120 +107,107 @@ def predict_rul_model_a(t_current: float, alpha: float, beta: float) -> float:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 模型 B: Wiener 漂移退化过程
+# 模型 B: Λ-时间 Wiener 退化过程 (修订版, 弃用对数变换)
 # ═══════════════════════════════════════════════════════════════════════
 
-def _to_X(i: np.ndarray) -> np.ndarray:
-    """对数化: X = ln(current - i0 + EPS)"""
-    return np.log(np.maximum(i - I_0, 0.0) + EPS)
+def _Lambda(t: np.ndarray, alpha: float, beta: float) -> np.ndarray:
+    """运行时间: Λ(t) = α(e^{βt} - 1)"""
+    return alpha * np.expm1(beta * t)
 
 
-def fit_model_b(t: np.ndarray, i: np.ndarray) -> dict:
-    """MLE 闭式解估计 Wiener 参数。
+def _Lambda_inv(s: float, alpha: float, beta: float) -> float:
+    """运行时间逆映射: t = ln(1 + s/α) / β"""
+    return np.log1p(s / alpha) / beta
 
-    Returns
-    -------
-    dict with keys: mu, sigma_sq, mu_se, sigma_se, X_seq, X_F
+
+def fit_wiener_lambda(t: np.ndarray, i: np.ndarray,
+                      alpha: float, beta: float) -> dict:
+    """Λ-时间 Wiener 退化过程参数估计。
+
+    退化信号 D(t) = i(t) - i₀, D(t) = Λ(t) + σ_B·B(Λ(t))
+    σ_B² = (1/(K-1)) Σ (Δr_k)² / ΔΛ_k, r_k = D_k - Λ(t_k)
+
+    Returns dict: {sigma_B2, rmse, r2}
     """
-    X = _to_X(i)
-    dt = np.diff(t)
-    dX = np.diff(X)
+    D = i - I_0
+    Lam = _Lambda(t, alpha, beta)
+    r = D - Lam              # 残差
+    dLam = np.diff(Lam)
+    dr = np.diff(r)
 
-    # MLE 闭式解
-    T_total = t[-1] - t[0]
-    mu_hat = (X[-1] - X[0]) / T_total if T_total > 0 else 0.0
+    K = len(t)
+    mask = dLam > 1e-15
+    if mask.sum() < 2:
+        return {"sigma_B2": 1e-10, "rmse": 0.0, "r2": 0.0}
 
-    # 加权残差
-    weighted_resid = (dX - mu_hat * dt) ** 2 / dt
-    sigma_sq_hat = np.mean(weighted_resid)
+    sigma_B2 = float(np.sum((dr[mask]) ** 2 / dLam[mask]) / (mask.sum() - 1))
 
-    # Fisher 信息标准误
-    K = len(dt)
-    mu_se = np.sqrt(sigma_sq_hat / T_total) if T_total > 0 else np.inf
-    sigma_se = np.sqrt(2 * sigma_sq_hat ** 2 / K) if K > 0 else np.inf
-
-    # 对数化失效阈值
-    X_F = np.log(max(I_F - I_0, EPS) + EPS)
+    # 拟合优度
+    rmse = float(np.sqrt(np.mean(r ** 2)))
+    ss_tot = np.sum((D - np.mean(D)) ** 2)
+    r2 = 1 - np.sum(r ** 2) / ss_tot if ss_tot > 0 else 0.0
 
     return {
-        "mu": mu_hat,
-        "sigma_sq": sigma_sq_hat,
-        "mu_se": mu_se,
-        "sigma_se": sigma_se,
-        "X_seq": X,
-        "X_F": X_F,
+        "sigma_B2": sigma_B2,
+        "rmse": rmse,
+        "r2": r2,
+        "D_seq": D,
+        "Lam_seq": Lam,
     }
 
 
-def _ig_cdf(x: float, m: float, lam: float) -> float:
-    """逆高斯分布 IG(m, λ) 的 CDF，用标准正态 CDF 表示。
-
-    F(x) = Φ(√(λ/x)·(x/m - 1)) + exp(2λ/m)·Φ(-√(λ/x)·(x/m + 1))
-    """
-    if x <= 0:
-        return 0.0
-    z1 = np.sqrt(lam / x) * (x / m - 1.0)
-    z2 = -np.sqrt(lam / x) * (x / m + 1.0)
-    return float(norm.cdf(z1) + np.exp(2.0 * lam / m) * norm.cdf(z2))
-
-
-def _ig_ppf(q: float, m: float, lam: float) -> float:
-    """逆高斯 IG(m, λ) 的分位数函数 (PPF)，用数值求根。"""
-    if q <= 0:
-        return 0.0
-    if q >= 1:
-        return np.inf
-
-    # 搜索区间: 用 Chebyshev 不等式做一个宽松上界
-    var_ig = m ** 3 / lam
-    lo, hi = 1e-6, m + 20.0 * np.sqrt(var_ig)
-
-    # 扩大上界直到 CDF(hi) >= q
-    for _ in range(30):
-        if _ig_cdf(hi, m, lam) >= q:
-            break
-        hi *= 2.0
-
-    try:
-        return float(brentq(lambda x: _ig_cdf(x, m, lam) - q, lo, hi, maxiter=100))
-    except Exception:
-        return m  # 退回均值
-
-
-def predict_rul_wiener(
+def predict_rul_lambda_wiener(
     t_current: float,
     i_current: float,
-    mu: float,
-    sigma_sq: float,
-    x_F: float,
+    alpha: float,
+    beta: float,
+    sigma_B2: float,
 ) -> dict:
-    """Wiener 首达时（逆高斯）RUL 预测。
+    """Λ-时间 Wiener 首达时 RUL 预测。
 
-    Returns
-    -------
-    dict with: RUL (点估计), CI_lo, CI_hi, P_30, P_90, P_180
+    1. D_c = i_current - I_0, D_F = I_F - I_0
+    2. ΔU ~ IG(D_F - D_c, (D_F - D_c)²/σ_B²)  (Λ-空间内的剩余运行时间)
+    3. RUL = Λ⁻¹(Λ(t_c) + ΔU) - t_c
+
+    Returns dict: RUL, CI_lo, CI_hi, P_30, P_90, P_180
     """
-    x_t = np.log(max(i_current - I_0, EPS) + EPS)
-    delta_x = x_F - x_t
+    D_c = i_current - I_0
+    D_F = I_F - I_0
 
-    if delta_x <= 0:
+    if D_F <= D_c:
         return {"RUL": 0.0, "CI_lo": 0.0, "CI_hi": 0.0,
                 "P_30": 1.0, "P_90": 1.0, "P_180": 1.0}
 
-    if mu <= 0 or sigma_sq <= 0:
+    if sigma_B2 <= 0 or beta <= 0 or alpha <= 0:
         return {"RUL": np.inf, "CI_lo": np.inf, "CI_hi": np.inf,
                 "P_30": 0.0, "P_90": 0.0, "P_180": 0.0}
 
-    # IG(m, λ): m = 均值, λ = 形状
-    m_ig = delta_x / mu
-    lam_ig = delta_x ** 2 / sigma_sq
+    # IG on ΔU (Λ-空间剩余量)
+    delta_D = D_F - D_c
+    m_ig = delta_D           # E[ΔU]
+    lam_ig = delta_D ** 2 / sigma_B2  # 形状
 
-    rul_hat = m_ig  # E[RUL]
-    ci_lo = _ig_ppf(ALPHA_CI / 2, m_ig, lam_ig)
-    ci_hi = _ig_ppf(1 - ALPHA_CI / 2, m_ig, lam_ig)
+    # 点估计: E[ΔU] → 映回日历
+    Lam_c = _Lambda(np.array([t_current]), alpha, beta)[0]
+    dU_med = m_ig
+    t_eol_med = _Lambda_inv(Lam_c + dU_med, alpha, beta)
+    rul_hat = max(0.0, t_eol_med - t_current)
 
+    # CI: 取 IG 分位数 → 映射
+    ci_lo_dU = _ig_ppf(ALPHA_CI / 2, m_ig, lam_ig)
+    ci_hi_dU = _ig_ppf(1 - ALPHA_CI / 2, m_ig, lam_ig)
+
+    t_eol_lo = _Lambda_inv(Lam_c + ci_lo_dU, alpha, beta)
+    t_eol_hi = _Lambda_inv(Lam_c + ci_hi_dU, alpha, beta)
+    ci_lo = max(0.0, t_eol_lo - t_current)
+    ci_hi = max(0.0, t_eol_hi - t_current)
+
+    # RUL 概率: P(RUL < days) = P(t_eol < t_c + days)
+    # = P(ΔU < Λ(t_c + days) - Λ(t_c))
     def _p_rul(days: float) -> float:
-        return _ig_cdf(days, m_ig, lam_ig)
+        Lam_target = _Lambda(np.array([t_current + days]), alpha, beta)[0]
+        dU_target = Lam_target - Lam_c
+        return _ig_cdf(dU_target, m_ig, lam_ig)
 
     return {
         "RUL": float(rul_hat),
@@ -230,6 +217,37 @@ def predict_rul_wiener(
         "P_90": _p_rul(90),
         "P_180": _p_rul(180),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 逆高斯分布工具函数
+# ═══════════════════════════════════════════════════════════════════════
+
+def _ig_cdf(x: float, m: float, lam: float) -> float:
+    """IG(m, λ) CDF: Φ(√(λ/x)(x/m-1)) + exp(2λ/m)Φ(-√(λ/x)(x/m+1))"""
+    if x <= 0:
+        return 0.0
+    z1 = np.sqrt(lam / x) * (x / m - 1.0)
+    z2 = -np.sqrt(lam / x) * (x / m + 1.0)
+    return float(norm.cdf(z1) + np.exp(2.0 * lam / m) * norm.cdf(z2))
+
+
+def _ig_ppf(q: float, m: float, lam: float) -> float:
+    """IG(m, λ) PPF，数值求根."""
+    if q <= 0:
+        return 0.0
+    if q >= 1:
+        return np.inf
+    var_ig = m ** 3 / lam
+    lo, hi = 1e-6, m + 20.0 * np.sqrt(var_ig)
+    for _ in range(30):
+        if _ig_cdf(hi, m, lam) >= q:
+            break
+        hi *= 2.0
+    try:
+        return float(brentq(lambda x: _ig_cdf(x, m, lam) - q, lo, hi, maxiter=100))
+    except Exception:
+        return m
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -246,11 +264,14 @@ def classify_stage_threshold(phi: float) -> str:
         return "F"
 
 
-def classify_stage_pelt(values: np.ndarray, pen: float = PELT_PEN) -> list:
-    """PELT 变点检测辅助准则 (需要 ruptures 库)。
-
-    返回每点的阶段标签列表。若 ruptures 不可用则返回 None。
-    """
+def classify_stage_pelt(values: np.ndarray, pen: float | None = None) -> list:
+    """PELT 变点检测辅助准则。pen=None 时自适应: pen = BETA_PEN * var(resid) * ln(K)。"""
+    if pen is None:
+        # 自适应罚项
+        smooth = pd.Series(values).rolling(window=min(10, len(values)),
+                                            min_periods=1, center=True).mean().values
+        resid_var = np.var(values - smooth) if len(values) > 1 else 1.0
+        pen = BETA_PEN * resid_var * np.log(len(values))
     try:
         from ruptures import Pelt
         model = Pelt(model="rbf").fit(values)
@@ -319,15 +340,14 @@ def main() -> None:
     print(f"  附件2 RUL (模型A) = {rul_a:.1f} 天")
 
     # ── 模型 B: Wiener ──
-    print("\n[模型 B] Wiener 漂移退化过程")
-    res_b = fit_model_b(t2, i2)  # 在附件2 上估计（目标域）
-    print(f"  μ = {res_b['mu']:.8f}  /day")
-    print(f"  σ² = {res_b['sigma_sq']:.8f}")
-    print(f"  μ SE = {res_b['mu_se']:.8f}")
-    print(f"  X_F = {res_b['X_F']:.6f}")
+    print("\n[模型 B] Λ-时间 Wiener 退化过程")
+    # 复用附件1 模型 A 的 (α, β) 作为 Λ(t) 参数，在附件2 残差上估计 σ_B²
+    res_b = fit_wiener_lambda(t2, i2, res_a["alpha"], res_a["beta"])
+    print(f"  σ_B² = {res_b['sigma_B2']:.8f}")
+    print(f"  RMSE (残差) = {res_b['rmse']:.4f}, R² = {res_b['r2']:.4f}")
 
-    rul_b = predict_rul_wiener(
-        t2[-1], i2[-1], res_b["mu"], res_b["sigma_sq"], res_b["X_F"]
+    rul_b = predict_rul_lambda_wiener(
+        t2[-1], i2[-1], res_a["alpha"], res_a["beta"], res_b["sigma_B2"]
     )
     print(f"  附件2 RUL (模型B) = {rul_b['RUL']:.1f} 天")
     print(f"  95% CI: [{rul_b['CI_lo']:.1f}, {rul_b['CI_hi']:.1f}]")
@@ -358,9 +378,9 @@ def main() -> None:
 
     # 模型 B 参数表
     df_theta_b = pd.DataFrame([{
-        "mu": res_b["mu"], "sigma_sq": res_b["sigma_sq"],
-        "mu_se": res_b["mu_se"], "sigma_se": res_b["sigma_se"],
-        "X_F": res_b["X_F"],
+        "alpha": res_a["alpha"], "beta": res_a["beta"],
+        "sigma_B2": res_b["sigma_B2"],
+        "rmse": res_b["rmse"], "r2": res_b["r2"],
     }])
     save_result_table(df_theta_b, "Q1_theta_B_local.csv")
 
@@ -389,7 +409,8 @@ def main() -> None:
             "sigma_eps_sq": float(res_a["sigma_eps_sq"]),
         },
         "theta_B_local": {
-            "mu": float(res_b["mu"]), "sigma_sq": float(res_b["sigma_sq"]),
+            "alpha": float(res_a["alpha"]), "beta": float(res_a["beta"]),
+            "sigma_B2": float(res_b["sigma_B2"]),
         },
         "RUL_A": float(rul_a),
         "RUL_B": float(rul_b["RUL"]),

@@ -15,9 +15,9 @@ Q1_sens_wiener_window,wiener_window,1.0,see_csv,see_csv
 Q1_sens_beta0,beta0,0.0001,see_csv,see_csv
 Q1_sens_beta0,beta0,0.0005,see_csv,see_csv
 Q1_sens_beta0,beta0,0.001,see_csv,see_csv
-Q1_sens_eps,eps,0.0001,see_csv,see_csv
-Q1_sens_eps,eps,1e-06,see_csv,see_csv
-Q1_sens_eps,eps,1e-08,see_csv,see_csv
+Q1_sens_sigma_B,sigma_B_scale,0.5,see_csv,see_csv
+Q1_sens_sigma_B,sigma_B_scale,1.0,see_csv,see_csv
+Q1_sens_sigma_B,sigma_B_scale,2.0,see_csv,see_csv
 Q1_sens_wsmooth,W_smooth,20,see_csv,see_csv
 Q1_sens_wsmooth,W_smooth,50,see_csv,see_csv
 Q1_sens_wsmooth,W_smooth,100,see_csv,see_csv
@@ -25,9 +25,9 @@ Q3_sens_h,h,0.5,see_csv,see_csv
 Q3_sens_h,h,1.0,see_csv,see_csv
 Q3_sens_h,h,2.0,see_csv,see_csv
 Q3_sens_h,h,5.0,see_csv,see_csv
-Q3_sens_mmd_thr,MMD_thr,0.05,see_csv,see_csv
-Q3_sens_mmd_thr,MMD_thr,0.1,see_csv,see_csv
 Q3_sens_mmd_thr,MMD_thr,0.2,see_csv,see_csv
+Q3_sens_mmd_thr,MMD_thr,0.3,see_csv,see_csv
+Q3_sens_mmd_thr,MMD_thr,0.4,see_csv,see_csv
 Q3_sens_warning,warning,宽松,see_csv,see_csv
 Q3_sens_warning,warning,基线,see_csv,see_csv
 Q3_sens_warning,warning,严格,see_csv,see_csv

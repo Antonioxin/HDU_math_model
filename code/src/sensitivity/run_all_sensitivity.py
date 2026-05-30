@@ -15,11 +15,11 @@ SRC = ROOT / "code" / "src"
 sys.path.insert(0, str(SRC))
 
 from data.constants import (
-    I_0, I_F, DELTA_I_F, EPS, THETA_H, THETA_F,
+    I_0, I_F, DELTA_I_F, THETA_H, THETA_F,
     ALPHA_0, BETA_0, ALPHA_CI,
     W1, W2, W3, N_TOP, W_SMOOTH,
-    SIGMA_HI_MULT, HI_F, P_HEALTHY, PELT_PEN,
-    H_BANDWIDTH, MMD_THR,
+    HI_ALARM_K, HI_F, P_HEALTHY, BETA_PEN,
+    H_BANDWIDTH, MMD_THR, CORAL_THR, S_MAX,
     P_THR_180, P_THR_180_UP, P_THR_90, P_THR_30,
     SENS_RANGES,
 )
@@ -31,7 +31,7 @@ TABLES_DIR = RESULTS_DIR / "tables"
 # 重用 Q1 核心逻辑
 from q1.run_q1 import (
     _exp_model, fit_model_a, predict_rul_model_a,
-    _to_X, fit_model_b, predict_rul_wiener,
+    fit_wiener_lambda, predict_rul_lambda_wiener,
     classify_stage_threshold, _ig_ppf,
 )
 
@@ -39,18 +39,30 @@ from q1.run_q1 import (
 def run_q1_sens_I_F() -> pd.DataFrame:
     """Q1-S1: 失效阈值 i_F 扫描."""
     print("\n[Q1-S1] 失效阈值扫描...")
+    att1 = load_processed("att1_processed.csv")
     att2 = load_processed("att2_processed.csv")
     t2 = att2["day"].values
     i2 = att2["current"].values
 
+    # 用附件1 拟合模型 A (全寿命形状)
+    res_a = fit_model_a(att1["day"].values, att1["current"].values)
+
     rows = []
     for if_val in SENS_RANGES["I_F"]:
-        delta_if = if_val - I_0
-        res_b = fit_model_b(t2, i2)  # Wiener 与 i_F 无关
-        x_f = np.log(max(if_val - I_0, EPS) + EPS)
-        rul = predict_rul_wiener(t2[-1], i2[-1], res_b["mu"], res_b["sigma_sq"], x_f)
+        # 临时覆写 I_F
+        global I_F, DELTA_I_F
+        orig_IF, orig_DIF = I_F, DELTA_I_F
+        I_F = if_val
+        DELTA_I_F = I_F - I_0
+
+        rul = predict_rul_lambda_wiener(
+            t2[-1], i2[-1], res_a["alpha"], res_a["beta"], 1e-10
+        )
+        # 注意: sigma_B2 用 1e-10 (理论值), 只考察 i_F 影响
+        delta_if = I_F - I_0
         phi_last = (i2[-1] - I_0) / delta_if if delta_if > 0 else 999
         stage = classify_stage_threshold(phi_last)
+
         rows.append({
             "param": "I_F", "value": if_val,
             "RUL": round(rul["RUL"], 1),
@@ -59,6 +71,9 @@ def run_q1_sens_I_F() -> pd.DataFrame:
             "CI_width": round(rul["CI_hi"] - rul["CI_lo"], 1),
             "stage": stage,
         })
+
+        I_F, DELTA_I_F = orig_IF, orig_DIF
+
     df = pd.DataFrame(rows)
     save_result_table(df, "Q1_sens_I_F.csv")
     return df
@@ -95,9 +110,11 @@ def run_q1_sens_theta() -> pd.DataFrame:
 def run_q1_sens_wiener_window() -> pd.DataFrame:
     """Q1-S3: Wiener 拟合窗口扫描."""
     print("\n[Q1-S3] Wiener 拟合窗口扫描...")
+    att1 = load_processed("att1_processed.csv")
     att2 = load_processed("att2_processed.csv")
     t2 = att2["day"].values
     i2 = att2["current"].values
+    res_a = fit_model_a(att1["day"].values, att1["current"].values)
     n = len(t2)
 
     rows = []
@@ -105,20 +122,48 @@ def run_q1_sens_wiener_window() -> pd.DataFrame:
         n_use = max(10, int(n * ratio))
         sub_t = t2[:n_use]
         sub_i = i2[:n_use]
-        res_b = fit_model_b(sub_t, sub_i)
-        x_f = np.log(max(I_F - I_0, EPS) + EPS)
-        rul = predict_rul_wiener(sub_t[-1], sub_i[-1], res_b["mu"], res_b["sigma_sq"], x_f)
+        res_b = fit_wiener_lambda(sub_t, sub_i, res_a["alpha"], res_a["beta"])
+        rul = predict_rul_lambda_wiener(
+            sub_t[-1], sub_i[-1], res_a["alpha"], res_a["beta"], res_b["sigma_B2"]
+        )
         rows.append({
             "param": "wiener_window",
             "ratio": ratio,
             "n_points": n_use,
-            "mu": res_b["mu"],
-            "sigma_sq": res_b["sigma_sq"],
+            "sigma_B2": res_b["sigma_B2"],
             "RUL": round(rul["RUL"], 1),
             "CI_width": round(rul["CI_hi"] - rul["CI_lo"], 1),
         })
     df = pd.DataFrame(rows)
     save_result_table(df, "Q1_sens_wiener_window.csv")
+    return df
+
+
+def run_q1_sens_sigma_B() -> pd.DataFrame:
+    """Q1-S6: σ_B 缩放扫描 (替换旧 ε 扫描)."""
+    print("\n[Q1-S6] σ_B 缩放扫描...")
+    att1 = load_processed("att1_processed.csv")
+    att2 = load_processed("att2_processed.csv")
+    t2 = att2["day"].values
+    i2 = att2["current"].values
+    res_a = fit_model_a(att1["day"].values, att1["current"].values)
+    res_b = fit_wiener_lambda(t2, i2, res_a["alpha"], res_a["beta"])
+    base_sigma = res_b["sigma_B2"]
+
+    rows = []
+    for scale in SENS_RANGES["SIGMA_B_SCALE"]:
+        sigma_scaled = base_sigma * scale
+        rul = predict_rul_lambda_wiener(
+            t2[-1], i2[-1], res_a["alpha"], res_a["beta"], sigma_scaled
+        )
+        rows.append({
+            "param": "sigma_B_scale", "scale": scale,
+            "sigma_B2": sigma_scaled,
+            "RUL": round(rul["RUL"], 1),
+            "CI_width": round(rul["CI_hi"] - rul["CI_lo"], 1),
+        })
+    df = pd.DataFrame(rows)
+    save_result_table(df, "Q1_sens_sigma_B.csv")
     return df
 
 
@@ -206,8 +251,8 @@ def run_q3_sens_bandwidth() -> pd.DataFrame:
     with open(q3_path, encoding="utf-8") as f:
         q3 = json.load(f)
     base_mmd = q3["MMD"]
-    base_mu_local = q3["mu_TL"]
-    base_sigma_local = q3["sigma_sq_TL"]
+    # 新格式: sigma_B2_TL, 旧格式回退
+    base_sigma = q3.get("sigma_B2_TL", q3.get("sigma_sq_TL", 0.03))
 
     rows = []
     for h in SENS_RANGES["H_BANDWIDTH"]:
@@ -283,59 +328,47 @@ def run_q3_sens_warning() -> pd.DataFrame:
 
 
 def run_q3_sens_iF() -> pd.DataFrame:
-    """Q3-S6: 失效阈值映射联动 Q1-S1。
-
-    读取 Q1_sens_I_F 的 i_F 扫描值，用 Q3 迁移参数重算 RUL。
-    """
+    """Q3-S6: 失效阈值映射联动 Q1-S1。"""
     print("\n[Q3-S6] 失效阈值联动扫描...")
 
-    # 读取 Q1 扫描点
     q1_sens_path = TABLES_DIR / "Q1_sens_I_F.csv"
     q3_path = TABLES_DIR / "Q3_summary.json"
     if not q1_sens_path.exists():
-        print("  [SKIP] Q1_sens_I_F.csv 不存在，请先运行 Q1 敏感性")
+        print("  [SKIP] Q1_sens_I_F.csv 不存在")
         return pd.DataFrame()
     if not q3_path.exists():
-        print("  [SKIP] Q3_summary.json 不存在，请先运行 Q3")
+        print("  [SKIP] Q3_summary.json 不存在")
         return pd.DataFrame()
 
     import json
     with open(q3_path, encoding="utf-8") as f:
         q3 = json.load(f)
 
-    mu_TL = q3.get("mu_TL", 0)
-    sigma_sq_TL = q3.get("sigma_sq_TL", 0)
+    # 新格式: alpha, beta, sigma_B2; 旧格式回退
+    theta_b = q3.get("theta_B_local", {})
+    alpha = theta_b.get("alpha", 0.598)
+    beta = theta_b.get("beta", 0.000358)
+    sigma_B2 = theta_b.get("sigma_B2", 1e-10)
 
-    # 加载附件2 当前数据
     att2 = load_processed("att2_processed.csv")
     i_current = att2["current"].values[-1]
+    t_current = att2["day"].values[-1]
 
     df_q1 = pd.read_csv(q1_sens_path)
     iF_values = df_q1["value"].values
 
     rows = []
     for if_val in iF_values:
-        x_f = np.log(max(if_val - I_0, EPS) + EPS)
-        x_t = np.log(max(i_current - I_0, EPS) + EPS)
-        delta_x = x_f - x_t
-
-        if delta_x <= 0 or mu_TL <= 0:
-            rul = 0.0
-            ci_lo, ci_hi = 0.0, 0.0
-        else:
-            m_ig = delta_x / mu_TL
-            lam_ig = delta_x ** 2 / sigma_sq_TL
-            rul = m_ig
-            ci_lo = _ig_ppf(ALPHA_CI / 2, m_ig, lam_ig)
-            ci_hi = _ig_ppf(1 - ALPHA_CI / 2, m_ig, lam_ig)
-
+        rul = predict_rul_lambda_wiener(
+            t_current, i_current, alpha, beta, sigma_B2
+        )
         rows.append({
             "param": "I_F",
             "value": if_val,
-            "RUL_TL": round(rul, 1),
-            "CI_lo_TL": round(ci_lo, 1),
-            "CI_hi_TL": round(ci_hi, 1),
-            "CI_width_TL": round(ci_hi - ci_lo, 1),
+            "RUL_TL": round(rul["RUL"], 1),
+            "CI_lo_TL": round(rul["CI_lo"], 1),
+            "CI_hi_TL": round(rul["CI_hi"], 1),
+            "CI_width_TL": round(rul["CI_hi"] - rul["CI_lo"], 1),
         })
 
     df = pd.DataFrame(rows)
@@ -356,7 +389,7 @@ def main() -> None:
     all_dfs["Q1_sens_theta"] = run_q1_sens_theta()
     all_dfs["Q1_sens_wiener_window"] = run_q1_sens_wiener_window()
     all_dfs["Q1_sens_beta0"] = run_q1_sens_beta0()
-    all_dfs["Q1_sens_eps"] = run_q1_sens_eps()
+    all_dfs["Q1_sens_sigma_B"] = run_q1_sens_sigma_B()
     all_dfs["Q1_sens_wsmooth"] = run_q1_sens_wsmooth()
 
     # Q3 敏感性

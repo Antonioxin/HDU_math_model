@@ -15,7 +15,7 @@ PROCESSED = ROOT / "code" / "data" / "processed"
 # 导入常量
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from src.data.constants import I_0, I_F, DELTA_I_F, EPS, THETA_H, THETA_F
+from src.data.constants import I_0, I_F, DELTA_I_F, THETA_H, THETA_F
 
 
 def load_att1_raw() -> pd.DataFrame:
@@ -53,8 +53,8 @@ def preprocess_att1(df: pd.DataFrame) -> pd.DataFrame:
     # 标准化退化进度
     df["phi"] = df["delta_i_cum"] / DELTA_I_F
 
-    # 对数化退化变量（Wiener 模型用）
-    df["X"] = np.log(np.maximum(df["current"] - I_0, 0.0) + EPS)
+    # 对数化退化变量 (已弃用对数变换, 保留兼容)
+    df["X"] = np.log(np.maximum(df["current"] - I_0, 1e-6) + 1e-6)
 
     # 阶段标签
     df["stage"] = df["phi"].apply(_classify_stage)
@@ -69,7 +69,7 @@ def preprocess_att2(df: pd.DataFrame) -> pd.DataFrame:
     df["delta_i"] = df["current"] - df["current_theoretical"]
     df["delta_i_cum"] = df["current"] - I_0
     df["phi"] = df["delta_i_cum"] / DELTA_I_F
-    df["X"] = np.log(np.maximum(df["current"] - I_0, 0.0) + EPS)
+    df["X"] = np.log(np.maximum(df["current"] - I_0, 1e-6) + 1e-6)
     df["stage"] = df["phi"].apply(_classify_stage)
 
     return df
