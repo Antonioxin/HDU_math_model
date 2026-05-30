@@ -17,20 +17,24 @@ TABLES_DIR = ROOT / "code" / "results" / "tables"
 
 
 def _get_rul_range(csv_path: str) -> tuple[str, float, float, float]:
-    """读取敏感性 CSV，返回 (参数名, baseline, min, max)."""
+    """读取敏感性 CSV。优先 RUL；若平坦则回退 CI_width."""
     p = TABLES_DIR / csv_path
     if not p.exists():
         return ("", 0, 0, 0)
     df = pd.read_csv(p)
-    if "RUL" not in df.columns or len(df) < 2:
-        return ("", 0, 0, 0)
+    param_name = str(df.iloc[0, 0]) if len(df.columns) > 0 else csv_path
 
-    ruls = df["RUL"].dropna().values
-    if len(ruls) == 0:
-        return ("", 0, 0, 0)
-
-    param_name = str(df["param"].values[0]) if "param" in df.columns else csv_path
-    return (param_name, ruls[0], ruls.min(), ruls.max())
+    for col in ["RUL", "RUL_TL"]:
+        if col in df.columns:
+            vals = df[col].dropna().values
+            if len(vals) >= 2 and (vals.max() - vals.min()) / max(abs(vals[0]), 1) > 0.005:
+                return (param_name, float(vals[0]), float(vals.min()), float(vals.max()))
+    for col in ["CI_width", "CI_width_TL"]:
+        if col in df.columns:
+            vals = df[col].dropna().values
+            if len(vals) >= 2:
+                return (param_name, float(vals[0]), float(vals.min()), float(vals.max()))
+    return ("", 0, 0, 0)
 
 
 def main() -> None:
@@ -38,16 +42,14 @@ def main() -> None:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
 
     sens_files = [
-        ("失效阈值 i_F", "Q1_sens_I_F.csv"),
-        ("Wiener 窗口", "Q1_sens_wiener_window.csv"),
-        ("平滑窗口 W", "Q1_sens_wsmooth.csv"),
-        ("迁移带宽 h", "Q3_sens_h.csv"),
+        ("σ_B 缩放\n(CI 宽度)", "Q1_sens_sigma_B.csv"),
+        ("Wiener\n拟合窗口",     "Q1_sens_wiener_window.csv"),
     ]
 
     items = []
     for label, fname in sens_files:
         name, base, lo, hi = _get_rul_range(fname)
-        if base > 0:
+        if base > 0 and (hi - lo) / base > 0.005:
             items.append({
                 "label": label,
                 "baseline": base,
@@ -55,6 +57,8 @@ def main() -> None:
                 "max": hi,
                 "range_pct": (hi - lo) / base * 100 if base > 0 else 0,
             })
+        else:
+            print(f"  [skip] {label}: 变化过小或无 RUL 列")
 
     if not items:
         print("[plot sens] 无敏感性数据可画")
@@ -62,7 +66,7 @@ def main() -> None:
 
     items.sort(key=lambda x: x["range_pct"], reverse=True)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig, ax = plt.subplots(figsize=(10, 3.5 + 0.5 * len(items)))
 
     labels = [it["label"] for it in items]
     y_pos = range(len(labels))
@@ -70,25 +74,30 @@ def main() -> None:
     for i, it in enumerate(items):
         lo_pct = (it["min"] - it["baseline"]) / it["baseline"] * 100
         hi_pct = (it["max"] - it["baseline"]) / it["baseline"] * 100
-        ax.barh(i, hi_pct - lo_pct, left=lo_pct, height=0.5,
-                color="#1f77b4", alpha=0.7, edgecolor="white")
-        ax.axvline(0, color="black", lw=0.8)
+        ax.barh(i, hi_pct - lo_pct, left=lo_pct, height=0.6,
+                color="#4472C4", alpha=0.85, edgecolor="white", linewidth=0.5)
 
-        # 标注数值
-        for pct, x_offset in [(lo_pct, -1), (hi_pct, 1)]:
-            if abs(pct) > 1:
-                ax.text(pct + x_offset * 0.5, i, f"{it['min']:.0f}" if pct < 0 else f"{it['max']:.0f}",
-                        va="center", ha="right" if pct < 0 else "left", fontsize=8)
+        # 数值标在 bar 两端外侧
+        bar_left = lo_pct
+        bar_right = hi_pct
+        if abs(bar_left) > 0.5:
+            ax.text(bar_left - 6.0, i, f"{it['min']:.0f}",
+                    va="center", ha="right", fontsize=8, color="#333")
+        if abs(bar_right) > 0.5 and (bar_right - bar_left) > 5:
+            ax.text(bar_right + 4.0, i, f"{it['max']:.0f}",
+                    va="center", ha="left", fontsize=8, color="#333")
 
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(labels)
-    ax.set_xlabel("RUL 变化 (%)")
-    ax.set_title("敏感性 Tornado 图")
+    ax.set_yticks(list(y_pos))
+    ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlabel("相对基线变化 (%)", fontsize=10)
+    ax.set_title("敏感性 Tornado 图", fontsize=12, fontweight="bold")
     ax.axvline(0, color="black", lw=0.8)
     ax.invert_yaxis()
 
-    fig.tight_layout()
-    fig.savefig(FIG_DIR / "sens_tornado.png")
+    fig.subplots_adjust(left=0.42, right=0.92, top=0.90, bottom=0.15)
+    ax.set_xlim(-100, ax.get_xlim()[1] + 5)
+
+    fig.savefig(FIG_DIR / "sens_tornado.png", dpi=150)
     print(f"[plot] saved sens_tornado.png")
     plt.close(fig)
 

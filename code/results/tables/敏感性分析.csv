@@ -9,14 +9,14 @@ Q1_sens_I_F,I_F,1.5,see_csv,see_csv
 Q1_sens_theta,theta,0.03,see_csv,see_csv
 Q1_sens_theta,theta,0.05,see_csv,see_csv
 Q1_sens_theta,theta,0.1,see_csv,see_csv
+Q1_sens_wiener_window,wiener_window,1.0,see_csv,see_csv
 Q1_sens_wiener_window,wiener_window,0.5,see_csv,see_csv
 Q1_sens_wiener_window,wiener_window,0.7,see_csv,see_csv
-Q1_sens_wiener_window,wiener_window,1.0,see_csv,see_csv
 Q1_sens_beta0,beta0,0.0001,see_csv,see_csv
 Q1_sens_beta0,beta0,0.0005,see_csv,see_csv
 Q1_sens_beta0,beta0,0.001,see_csv,see_csv
-Q1_sens_sigma_B,sigma_B_scale,0.5,see_csv,see_csv
 Q1_sens_sigma_B,sigma_B_scale,1.0,see_csv,see_csv
+Q1_sens_sigma_B,sigma_B_scale,0.5,see_csv,see_csv
 Q1_sens_sigma_B,sigma_B_scale,2.0,see_csv,see_csv
 Q1_sens_wsmooth,W_smooth,20,see_csv,see_csv
 Q1_sens_wsmooth,W_smooth,50,see_csv,see_csv

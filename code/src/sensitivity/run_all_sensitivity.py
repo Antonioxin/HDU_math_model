@@ -135,6 +135,8 @@ def run_q1_sens_wiener_window() -> pd.DataFrame:
             "CI_width": round(rul["CI_hi"] - rul["CI_lo"], 1),
         })
     df = pd.DataFrame(rows)
+    # 默认值 (ratio=1.0) 置顶作基线
+    df = pd.concat([df[df["ratio"] == 1.0], df[df["ratio"] != 1.0]]).reset_index(drop=True)
     save_result_table(df, "Q1_sens_wiener_window.csv")
     return df
 
@@ -163,6 +165,8 @@ def run_q1_sens_sigma_B() -> pd.DataFrame:
             "CI_width": round(rul["CI_hi"] - rul["CI_lo"], 1),
         })
     df = pd.DataFrame(rows)
+    # 默认值 (scale=1.0) 置顶作基线
+    df = pd.concat([df[df["scale"] == 1.0], df[df["scale"] != 1.0]]).reset_index(drop=True)
     save_result_table(df, "Q1_sens_sigma_B.csv")
     return df
 
